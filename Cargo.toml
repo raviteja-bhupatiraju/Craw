@@ -22,7 +22,12 @@ path = "src/lib.rs"
 
 [profile.release]
 opt-level = 3
-lto = true
+# Fat LTO (`lto = true`) merges the whole dependency graph - including
+# chumsky's deeply-generic recursive parser combinator types - into one
+# LLVM module. That pass needs more stack than the Windows MSVC linker
+# thread gets by default and crashes rustc with STATUS_ACCESS_VIOLATION.
+# Thin LTO keeps nearly all the runtime benefit without that failure mode.
+lto = "thin"
 codegen-units = 1
 panic = "abort"
 strip = true
