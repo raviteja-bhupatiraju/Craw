@@ -26,14 +26,13 @@ path = "src/lib.rs"
 
 [profile.release]
 opt-level = 3
-# LTO (fat or thin) merges the whole dependency graph - including
-# chumsky's deeply-generic recursive parser combinator types - into one
-# LLVM module for cross-crate optimization. Codegen for that merged
-# module overflows rustc's own compilation-thread stack (confirmed via
-# a reproducible SIGSEGV inside LLVM's SelectionDAG instruction
-# selection, not specific to any one platform or toolchain), so it's
-# off entirely rather than merely switched between LTO modes.
-lto = false
-codegen-units = 1
+# Both LTO and codegen-units = 1 force chumsky's deeply-generic
+# recursive parser combinator types to be optimized as one giant LLVM
+# module instead of several smaller, parallel ones. That single module
+# is large enough to crash rustc's own LLVM backend outright (confirmed
+# by reproducing two different SIGSEGVs locally, in two different LLVM
+# passes, independent of platform or toolchain) - so both are left off
+# rather than merely tuned, trading a slower/larger release binary for
+# the build reliably completing at all.
 panic = "abort"
 strip = true
