@@ -1,0 +1,5 @@
+def main():
+    f = λ x: x * 2
+    print(f(10))
+
+main()

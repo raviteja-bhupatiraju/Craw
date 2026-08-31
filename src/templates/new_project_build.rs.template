@@ -1,0 +1,13 @@
+use std::process::Command;
+
+fn main() {
+    println!("cargo:rerun-if-changed=src/main.craw");
+    let status = Command::new("craw")
+        .args(&["transpile", "src/main.craw", "src/main_transpiled.rs"])
+        .status()
+        .expect("Failed to execute craw transpile");
+    
+    if !status.success() {
+        panic!("craw transpile failed");
+    }
+}

@@ -1,0 +1,148 @@
+data Point(x, y=0)
+
+# --- Phase 1 Features ---
+def add(a, b):
+    return a + b
+
+a = Point(1, 2)
+print("Created Data Class:", a)
+
+# Multi-arg pipe
+[10, 20] |*> add |> print  # Should print 30
+
+# Attribute access & Partials
+print("Attribute access (.x):", a.x)
+get_x = .x
+print("Attribute partial (.x)(a):", get_x(a))
+
+inc = x => x + 1
+print("Lambda evaluated:", inc(5))
+
+5 |> inc |> print
+
+# Implicit lambda
+inc_implicit = (_ + 1)
+print("Implicit lambda:", inc_implicit(10))
+
+# Coefficients
+x = 10
+print("Coefficient (2x):", 2x)
+
+# Collections
+items = [1, 2, 3]
+items[0] = 10
+print("List modification:", items)
+
+mapping = {"key": "value"}
+print("Dict access:", mapping["key"])
+
+# None Coalescing & None-aware pipe
+empty = None
+print("Coalesce:", empty ?? "Default Value")
+empty |?> print  # Should do nothing (None-aware)
+
+# Partial Application
+add_ten = add$(?, 10)
+print("Partial:", add_ten(5))
+
+# Pattern Matching
+match a:
+    case Point(x, y):
+        print("Matched Point x:", x)
+
+# --- Phase 2 Features ---
+
+# 1. Assignment functions
+def double(x) = x * 2
+print("Assignment function (double(21)):", double(21))
+
+# 2. Tail Call Optimization (Recursive)
+def factorial(n, acc):
+    if n == 0:
+        return acc
+    return factorial(n - 1, n * acc)
+
+print("TCO Recursion (factorial(10, 1)):", factorial(10, 1))
+
+# Deep recursion test (should NOT stack overflow)
+def count(n):
+    if n == 0:
+        return "Done"
+    return count(n - 1)
+print("Deep recursion (count(1000)):", count(1000))
+
+# 3. addpattern
+def greet(n) = "Number " + n
+addpattern def greet(0) = "Zero"
+print("addpattern greet(0):", greet(0))
+print("addpattern greet(5):", greet(5))
+
+# 4. copyclosure
+# Demonstrating capture-freezing
+val = 10
+copyclosure def get_val() = val
+val = 20
+print("copyclosure frozen result (should be 10):", get_val())
+
+# --- Phase 3 Features ---
+
+# 1. Data Class Defaults
+b = Point(5)
+print("Data class default (Point(5).y):", b.y)
+
+# 2. match for loops
+print("match for loop:")
+for [x] in [[1], [2], [3]]:
+    print("  Loop item:", x)
+
+# 3. String destructuring
+match "user:alice":
+    case "user:" + name:
+        print("String destructuring (name):", name)
+
+# 4. View Patterns
+def abs(n):
+    if n < 0:
+        return 0 - n
+    return n
+
+match 0 - 5:
+    case (abs) -> 5:
+        print("View pattern matched absolute value")
+
+# --- Phase 4 Features ---
+
+# 1. where clause & functional built-ins
+total = sum_sq where:
+    # fmap, range, and reduce with partial application ($)
+    sum_sq = range(10) |> fmap$(x => x*x) |> reduce$((a, b) => a + b, 0)
+
+print("where clause (sum of squares 0-9):", total)
+
+# 2. groupsof and windowsof
+print("groupsof(2):")
+for [a, b] in range(6) |> groupsof$(2):
+    print("  Pair:", a, b)
+
+print("windowsof(3):")
+for [a, b, c] in range(5) |> windowsof$(3):
+    print("  Window:", a, b, c)
+
+# 3. global / nonlocal hints
+state = "initial"
+def change_global():
+    global state
+    state = "modified globally"
+
+change_global()
+print("global hint:", state)
+
+def outer_scope():
+    x = "original"
+    def inner_scope():
+        nonlocal x
+        x = "modified non-locally"
+    inner_scope()
+    return x
+
+print("nonlocal hint:", outer_scope())

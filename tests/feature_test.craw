@@ -1,0 +1,65 @@
+# Comprehensive Feature Test for Language Extensions
+
+# 1. Pipelines & Composition
+def add(a, b) = a + b
+def square(x) = x * x
+
+result = [10, 20] |*> add |> square
+print("Pipeline result (should be 900):", result)
+
+# Composition: (square >> add$(?, 5)) 10 => add(square(10), 5) = 105
+f = square >> add$(?, 5)
+print("Composition forward result (should be 105):", f(10))
+
+g = add$(?, 5) << square
+print("Composition backward result (should be 105):", g(10))
+
+# 2. Ranges & Gathering
+nums = 1..5
+print("Range 1..5:", nums)
+
+data Item(val)
+items = [Item(1), Item(2), Item(3)]
+vals = items..val
+print("Gathered values (should be [1, 2, 3]):", vals)
+
+# 3. Destructuring
+[x, y] = [100, 200]
+print("Destructured x, y:", x, y)
+
+[head, *tail] = [1, 2, 3]
+print("Head/Tail destructure:", head, tail)
+
+# 4. Match Guards
+for i in 1..5:
+    match i:
+        case n if n % 2 == 0:
+            print(n, "is even")
+        case n:
+            print(n, "is odd")
+
+# 5. Sets
+s1 = {1, 2, 3}
+s2 = {3, 4, 5}
+print("Union:", s1 | s2)
+print("Intersection:", s1 & s2)
+print("Is {1, 2} subset of s1?", {1, 2} ⊆ s1)
+print("Is 10 in s1?", 10 in s1)
+print("Is 1 not in s2?", 1 notin s2)
+
+# 6. ASCII alternatives
+print("1 in {1, 2}?", 1 in {1, 2})
+print("1 not in {2, 3}?", 1 notin {2, 3})
+
+# 7. Shorthand ADT arguments
+data Point(x, y)
+def get_x(Point(x, y)):
+    return x
+
+p = Point(42, 24)
+print("Point x via destructuring param:", get_x(p))
+
+def main():
+    print("Verification complete.")
+
+main()

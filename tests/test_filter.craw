@@ -1,0 +1,6 @@
+def main():
+    l = [True, False, True]
+    f = filter(x => x, l)
+    print("filter(x => x, l):", f)
+
+main()

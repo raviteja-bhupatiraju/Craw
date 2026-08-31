@@ -1,0 +1,11 @@
+def is_prime(x):
+    if x < 2:
+        return False
+    return all(fmap(y => x % y != 0, range(2, x)))
+
+def main():
+    for i in range(20):
+        if is_prime(i):
+            print(i, "is prime")
+
+main()

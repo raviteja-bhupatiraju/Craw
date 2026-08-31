@@ -1,0 +1,9 @@
+x = "Hello"
+print(x.upper())
+print(x.lower())
+print("  abc  ".strip())
+print("a,b,c".split(","))
+print("-".join(["a", "b", "c"]))
+print("hello".replace("e", "a"))
+print("hello".startswith("he"))
+print("hello".endswith("lo"))

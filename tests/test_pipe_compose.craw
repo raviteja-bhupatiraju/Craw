@@ -1,0 +1,17 @@
+def add1(x):
+    return x + 1
+
+def mul2(x):
+    return x * 2
+
+# Test pipeline
+val = 5 |> add1 |> mul2
+println(val) # Expected: 12
+
+# Test forward composition
+add_then_mul = add1 >> mul2
+println(add_then_mul(5)) # Expected: 12
+
+# Test backward composition
+mul_then_add = add1 << mul2
+println(mul_then_add(5)) # Expected: 11

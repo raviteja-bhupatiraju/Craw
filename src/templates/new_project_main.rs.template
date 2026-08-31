@@ -1,0 +1,11 @@
+#![allow(warnings)]
+mod runtime;
+use runtime::*;
+use std::rc::Rc;
+use std::cell::RefCell;
+
+include!("main_transpiled.rs");
+
+fn main() {
+    craw_main();
+}

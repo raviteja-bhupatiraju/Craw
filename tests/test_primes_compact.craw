@@ -1,0 +1,15 @@
+def primes(n):
+    sieve = [True for _ in range(n + 1)]; p = 2
+    while p * p <= n:
+        if sieve[p]:
+            i = p * p
+            while i <= n:
+                sieve[i] = False
+                i = i + p
+        p = p + 1
+    return filter(x => x, sieve[2:]).len()
+
+def main():
+    print("Primes(1000000) =", primes(1000000))
+
+main()

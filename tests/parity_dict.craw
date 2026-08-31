@@ -1,0 +1,7 @@
+d = {"a": 1, "b": 2}
+print(d.get("a"))
+print(d.get("c", 0))
+d.update({"c": 3})
+print(d.get("c"))
+print(d.pop("a"))
+print(d.get("a", "missing"))

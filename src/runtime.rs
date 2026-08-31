@@ -1,0 +1,2315 @@
+use std::any::Any;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::convert::TryFrom;
+use std::fmt;
+use std::hash::{Hash, Hasher};
+use std::rc::Rc;
+use std::sync::{Arc, Mutex, mpsc};
+
+#[derive(Clone)]
+pub enum CallResult {
+    Return(CrawValue),
+    TailCall(CrawValue, Vec<CrawValue>),
+    MatchError,
+}
+
+#[derive(Clone)]
+pub struct NdArray {
+    pub dims: Vec<usize>,
+    pub data: Rc<RefCell<Vec<CrawValue>>>,
+}
+
+impl PartialEq for NdArray {
+    fn eq(&self, other: &Self) -> bool {
+        self.dims == other.dims && self.data == other.data
+    }
+}
+impl Eq for NdArray {}
+
+#[derive(Clone)]
+pub enum CrawValue {
+    Int(i64),
+    Float(f64),
+    String(Rc<String>),
+    Bool(bool),
+    None,
+    Data(String, Vec<String>, Rc<RefCell<Vec<CrawValue>>>),
+    Closure(Rc<dyn Fn(Vec<CrawValue>) -> CallResult>),
+    List(Rc<RefCell<Vec<CrawValue>>>),
+    Tuple(Rc<Vec<CrawValue>>),
+    Dict(Rc<RefCell<HashMap<CrawValue, CrawValue>>>),
+    Set(Rc<RefCell<HashSet<CrawValue>>>),
+    Frozenset(Rc<HashSet<CrawValue>>),
+    Multiset(Rc<RefCell<HashMap<CrawValue, usize>>>),
+    LazyList(Rc<dyn Fn() -> Vec<CrawValue>>),
+    Builtin(String),
+    Expected(Result<Box<CrawValue>, String>),
+    Slice(Option<i64>, Option<i64>, Option<i64>),
+    Generator(
+        Arc<Mutex<mpsc::Receiver<PlainCrawValue>>>,
+        Arc<Mutex<mpsc::Sender<()>>>,
+    ),
+    Array(NdArray),
+    Recursive(Rc<RefCell<CrawValue>>),
+    Native(Rc<dyn Any>),
+    Formula(String, String),
+}
+
+impl PartialEq for CrawValue {
+    fn eq(&self, other: &Self) -> bool {
+        let a = craw_unwrap(self.clone());
+        let b = craw_unwrap(other.clone());
+        match (a, b) {
+            (CrawValue::Int(av), CrawValue::Int(bv)) => av == bv,
+            (CrawValue::Float(av), CrawValue::Float(bv)) => av == bv,
+            (CrawValue::Int(av), CrawValue::Float(bv)) => (av as f64) == bv,
+            (CrawValue::Float(av), CrawValue::Int(bv)) => av == (bv as f64),
+            (CrawValue::Bool(av), CrawValue::Bool(bv)) => av == bv,
+            (CrawValue::String(av), CrawValue::String(bv)) => av == bv,
+            (CrawValue::None, CrawValue::None) => true,
+            (CrawValue::List(av), CrawValue::List(bv)) => av == bv,
+            (CrawValue::Tuple(av), CrawValue::Tuple(bv)) => av == bv,
+            (CrawValue::Dict(av), CrawValue::Dict(bv)) => av == bv,
+            (CrawValue::Set(av), CrawValue::Set(bv)) => av == bv,
+            (CrawValue::Frozenset(av), CrawValue::Frozenset(bv)) => av == bv,
+            (CrawValue::Multiset(av), CrawValue::Multiset(bv)) => av == bv,
+            (CrawValue::Data(an, afn, afv), CrawValue::Data(bn, bfn, bfv)) => {
+                an == bn && afn == bfn && afv == bfv
+            }
+            (CrawValue::Formula(al, ar), CrawValue::Formula(bl, br)) => al == bl && ar == br,
+            (CrawValue::Slice(as_, ap, at), CrawValue::Slice(bs, bp, bt)) => {
+                as_ == bs && ap == bp && at == bt
+            }
+            (CrawValue::Builtin(av), CrawValue::Builtin(bv)) => av == bv,
+            (CrawValue::Closure(av), CrawValue::Closure(bv)) => Rc::ptr_eq(&av, &bv),
+            (CrawValue::Native(av), CrawValue::Native(bv)) => Rc::ptr_eq(&av, &bv),
+            (CrawValue::Generator(av, _), CrawValue::Generator(bv, _)) => Arc::ptr_eq(&av, &bv),
+            (CrawValue::LazyList(av), CrawValue::LazyList(bv)) => Rc::ptr_eq(&av, &bv),
+            (CrawValue::Array(av), CrawValue::Array(bv)) => av == bv,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for CrawValue {}
+
+impl Hash for CrawValue {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let val = craw_unwrap(self.clone());
+        match val {
+            CrawValue::Int(i) => {
+                0u8.hash(state);
+                i.hash(state);
+            }
+            CrawValue::Float(f) => {
+                let i = f as i64;
+                if i as f64 == f {
+                    0u8.hash(state);
+                    i.hash(state);
+                } else {
+                    1u8.hash(state);
+                    f.to_bits().hash(state);
+                }
+            }
+            CrawValue::String(s) => {
+                2u8.hash(state);
+                s.hash(state);
+            }
+            CrawValue::Bool(b) => {
+                3u8.hash(state);
+                b.hash(state);
+            }
+            CrawValue::None => {
+                4u8.hash(state);
+                ().hash(state);
+            }
+            CrawValue::Tuple(t) => {
+                5u8.hash(state);
+                t.hash(state);
+            }
+            CrawValue::Frozenset(s) => {
+                6u8.hash(state);
+                let mut h = 0u64;
+                for item in s.iter() {
+                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                    item.hash(&mut hasher);
+                    h = h.wrapping_add(hasher.finish());
+                }
+                h.hash(state);
+            }
+            CrawValue::Formula(l, r) => {
+                7u8.hash(state);
+                l.hash(state);
+                r.hash(state);
+            }
+            _ => panic!("TypeError: unhashable type"),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum PlainCrawValue {
+    Int(i64),
+    Float(f64),
+    String(String),
+    Bool(bool),
+    None,
+    Data(String, Vec<String>, Vec<PlainCrawValue>),
+    List(Vec<PlainCrawValue>),
+    Tuple(Vec<PlainCrawValue>),
+    Dict(Vec<(PlainCrawValue, PlainCrawValue)>),
+    Set(Vec<PlainCrawValue>),
+    Frozenset(Vec<PlainCrawValue>),
+    Multiset(Vec<(PlainCrawValue, usize)>),
+    Builtin(String),
+    Expected(Result<Box<PlainCrawValue>, String>),
+    Slice(Option<i64>, Option<i64>, Option<i64>),
+    Array(Vec<usize>, Vec<PlainCrawValue>),
+    Formula(String, String),
+}
+
+impl CrawValue {
+    pub fn to_plain(&self) -> PlainCrawValue {
+        match self {
+            CrawValue::Int(i) => PlainCrawValue::Int(*i),
+            CrawValue::Float(f) => PlainCrawValue::Float(*f),
+            CrawValue::String(s) => PlainCrawValue::String((**s).clone()),
+            CrawValue::Bool(b) => PlainCrawValue::Bool(*b),
+            CrawValue::None => PlainCrawValue::None,
+            CrawValue::Data(name, names, fields) => {
+                let plain_fields = fields.borrow().iter().map(|v| v.to_plain()).collect();
+                PlainCrawValue::Data(name.clone(), names.clone(), plain_fields)
+            }
+            CrawValue::List(items) => {
+                let plain_items = items.borrow().iter().map(|v| v.to_plain()).collect();
+                PlainCrawValue::List(plain_items)
+            }
+            CrawValue::Tuple(items) => {
+                let plain_items = items.iter().map(|v| v.to_plain()).collect();
+                PlainCrawValue::Tuple(plain_items)
+            }
+            CrawValue::Dict(items) => {
+                let mut plain_items = Vec::new();
+                for (k, v) in &*items.borrow() {
+                    plain_items.push((k.to_plain(), v.to_plain()));
+                }
+                PlainCrawValue::Dict(plain_items)
+            }
+            CrawValue::Set(items) => {
+                let plain_items = items.borrow().iter().map(|v| v.to_plain()).collect();
+                PlainCrawValue::Set(plain_items)
+            }
+            CrawValue::Frozenset(items) => {
+                let plain_items = items.iter().map(|v| v.to_plain()).collect();
+                PlainCrawValue::Frozenset(plain_items)
+            }
+            CrawValue::Multiset(items) => {
+                let mut plain_items = Vec::new();
+                for (k, count) in &*items.borrow() {
+                    plain_items.push((k.to_plain(), *count));
+                }
+                PlainCrawValue::Multiset(plain_items)
+            }
+            CrawValue::Builtin(s) => PlainCrawValue::Builtin(s.clone()),
+            CrawValue::Expected(res) => match res {
+                Ok(v) => PlainCrawValue::Expected(Ok(Box::new(v.to_plain()))),
+                Err(e) => PlainCrawValue::Expected(Err(e.clone())),
+            },
+            CrawValue::Slice(start, stop, step) => PlainCrawValue::Slice(*start, *stop, *step),
+            CrawValue::Array(arr) => {
+                let plain_data = arr.data.borrow().iter().map(|v| v.to_plain()).collect();
+                PlainCrawValue::Array(arr.dims.clone(), plain_data)
+            }
+            CrawValue::Recursive(r) => r.borrow().to_plain(),
+            CrawValue::Formula(lhs, rhs) => PlainCrawValue::Formula(lhs.clone(), rhs.clone()),
+            _ => panic!("Cannot deep-clone this variant to plain"),
+        }
+    }
+
+    pub fn from_plain(plain: PlainCrawValue) -> CrawValue {
+        match plain {
+            PlainCrawValue::Int(i) => CrawValue::Int(i),
+            PlainCrawValue::Float(f) => CrawValue::Float(f),
+            PlainCrawValue::String(s) => CrawValue::String(Rc::new(s)),
+            PlainCrawValue::Bool(b) => CrawValue::Bool(b),
+            PlainCrawValue::None => CrawValue::None,
+            PlainCrawValue::Data(name, names, fields) => {
+                let rc_fields = fields
+                    .into_iter()
+                    .map(|v| CrawValue::from_plain(v))
+                    .collect();
+                CrawValue::Data(name, names, Rc::new(RefCell::new(rc_fields)))
+            }
+            PlainCrawValue::List(items) => {
+                let rc_items = items
+                    .into_iter()
+                    .map(|v| CrawValue::from_plain(v))
+                    .collect();
+                CrawValue::List(Rc::new(RefCell::new(rc_items)))
+            }
+            PlainCrawValue::Tuple(items) => {
+                let rc_items = items
+                    .into_iter()
+                    .map(|v| CrawValue::from_plain(v))
+                    .collect();
+                CrawValue::Tuple(Rc::new(rc_items))
+            }
+            PlainCrawValue::Dict(items) => {
+                let mut rc_items = HashMap::new();
+                for (k, v) in items {
+                    rc_items.insert(CrawValue::from_plain(k), CrawValue::from_plain(v));
+                }
+                CrawValue::Dict(Rc::new(RefCell::new(rc_items)))
+            }
+            PlainCrawValue::Set(items) => {
+                let rc_items = items
+                    .into_iter()
+                    .map(|v| CrawValue::from_plain(v))
+                    .collect();
+                CrawValue::Set(Rc::new(RefCell::new(rc_items)))
+            }
+            PlainCrawValue::Frozenset(items) => {
+                let rc_items = items
+                    .into_iter()
+                    .map(|v| CrawValue::from_plain(v))
+                    .collect();
+                CrawValue::Frozenset(Rc::new(rc_items))
+            }
+            PlainCrawValue::Multiset(items) => {
+                let mut rc_items = HashMap::new();
+                for (k, count) in items {
+                    rc_items.insert(CrawValue::from_plain(k), count);
+                }
+                CrawValue::Multiset(Rc::new(RefCell::new(rc_items)))
+            }
+            PlainCrawValue::Builtin(s) => CrawValue::Builtin(s),
+            PlainCrawValue::Expected(res) => match res {
+                Ok(v) => CrawValue::Expected(Ok(Box::new(CrawValue::from_plain(*v)))),
+                Err(e) => CrawValue::Expected(Err(e)),
+            },
+            PlainCrawValue::Slice(start, stop, step) => CrawValue::Slice(start, stop, step),
+            PlainCrawValue::Array(dims, data) => {
+                let rc_data = data.into_iter().map(|v| CrawValue::from_plain(v)).collect();
+                CrawValue::Array(NdArray {
+                    dims,
+                    data: Rc::new(RefCell::new(rc_data)),
+                })
+            }
+            PlainCrawValue::Formula(lhs, rhs) => CrawValue::Formula(lhs, rhs),
+        }
+    }
+
+    pub fn try_into_native<T>(self) -> Result<T, String>
+    where
+        T: TryFrom<CrawValue, Error = String>,
+    {
+        T::try_from(self)
+    }
+
+    fn format_list(&self, f: &mut fmt::Formatter<'_>, prefix: &str, suffix: &str) -> fmt::Result {
+        write!(f, "{}", prefix)?;
+        match self {
+            CrawValue::List(items) => {
+                for (i, val) in items.borrow().iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", val)?;
+                }
+            }
+            CrawValue::Set(items) => {
+                for (i, val) in items.borrow().iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", val)?;
+                }
+            }
+            CrawValue::Multiset(items) => {
+                let mut first = true;
+                for (val, count) in items.borrow().iter() {
+                    for _ in 0..*count {
+                        if !first {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{}", val)?;
+                        first = false;
+                    }
+                }
+            }
+            CrawValue::Frozenset(items) => {
+                for (i, val) in items.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", val)?;
+                }
+            }
+            CrawValue::Tuple(items) => {
+                for (i, val) in items.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", val)?;
+                }
+            }
+            CrawValue::Data(_, _, fields) => {
+                for (i, val) in fields.borrow().iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", val)?;
+                }
+            }
+            _ => {}
+        }
+        write!(f, "{}", suffix)
+    }
+}
+
+impl From<i64> for CrawValue {
+    fn from(i: i64) -> Self {
+        CrawValue::Int(i)
+    }
+}
+impl From<usize> for CrawValue {
+    fn from(i: usize) -> Self {
+        CrawValue::Int(i as i64)
+    }
+}
+impl From<f64> for CrawValue {
+    fn from(f: f64) -> Self {
+        CrawValue::Float(f)
+    }
+}
+impl From<bool> for CrawValue {
+    fn from(b: bool) -> Self {
+        CrawValue::Bool(b)
+    }
+}
+impl From<String> for CrawValue {
+    fn from(s: String) -> Self {
+        CrawValue::String(Rc::new(s))
+    }
+}
+impl From<()> for CrawValue {
+    fn from(_: ()) -> Self {
+        CrawValue::None
+    }
+}
+
+impl TryFrom<CrawValue> for i64 {
+    type Error = String;
+    fn try_from(v: CrawValue) -> Result<Self, Self::Error> {
+        match v {
+            CrawValue::Int(i) => Ok(i),
+            _ => Err("Expected Int".to_string()),
+        }
+    }
+}
+impl TryFrom<CrawValue> for f64 {
+    type Error = String;
+    fn try_from(v: CrawValue) -> Result<Self, Self::Error> {
+        match v {
+            CrawValue::Float(f) => Ok(f),
+            CrawValue::Int(i) => Ok(i as f64),
+            _ => Err("Expected Float".to_string()),
+        }
+    }
+}
+impl TryFrom<CrawValue> for bool {
+    type Error = String;
+    fn try_from(v: CrawValue) -> Result<Self, Self::Error> {
+        match v {
+            CrawValue::Bool(b) => Ok(b),
+            _ => Err("Expected Bool".to_string()),
+        }
+    }
+}
+impl TryFrom<CrawValue> for String {
+    type Error = String;
+    fn try_from(v: CrawValue) -> Result<Self, Self::Error> {
+        match v {
+            CrawValue::String(s) => Ok((*s).clone()),
+            _ => Err("Expected String".to_string()),
+        }
+    }
+}
+
+impl<T> From<Vec<T>> for CrawValue
+where
+    T: Into<CrawValue>,
+{
+    fn from(v: Vec<T>) -> Self {
+        CrawValue::List(Rc::new(RefCell::new(
+            v.into_iter().map(Into::into).collect(),
+        )))
+    }
+}
+
+impl<T> From<std::collections::HashMap<String, T>> for CrawValue
+where
+    T: Into<CrawValue>,
+{
+    fn from(v: std::collections::HashMap<String, T>) -> Self {
+        CrawValue::Dict(Rc::new(RefCell::new(
+            v.into_iter()
+                .map(|(k, v)| (CrawValue::from(k), v.into()))
+                .collect(),
+        )))
+    }
+}
+
+impl<T> TryFrom<CrawValue> for Vec<T>
+where
+    T: TryFrom<CrawValue, Error = String>,
+{
+    type Error = String;
+    fn try_from(v: CrawValue) -> Result<Self, Self::Error> {
+        match v {
+            CrawValue::List(l) => l.borrow().iter().map(|i| T::try_from(i.clone())).collect(),
+            _ => Err("Expected List".to_string()),
+        }
+    }
+}
+
+impl<T> TryFrom<CrawValue> for std::collections::HashMap<String, T>
+where
+    T: TryFrom<CrawValue, Error = String>,
+{
+    type Error = String;
+    fn try_from(v: CrawValue) -> Result<Self, Self::Error> {
+        match v {
+            CrawValue::Dict(d) => d
+                .borrow()
+                .iter()
+                .map(|(k, v)| Ok((String::try_from(k.clone())?, T::try_from(v.clone())?)))
+                .collect(),
+            _ => Err("Expected Dict".to_string()),
+        }
+    }
+}
+
+impl fmt::Debug for CrawValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CrawValue::Int(i) => write!(f, "{}", i),
+            CrawValue::Float(fv) => write!(f, "{:?}", fv),
+            CrawValue::String(s) => write!(f, "{:?}", s),
+            CrawValue::Bool(b) => write!(f, "{}", b),
+            CrawValue::None => write!(f, "None"),
+            CrawValue::Data(name, _, fields) => {
+                let mut d = f.debug_tuple(name);
+                for v in &*fields.borrow() {
+                    d.field(v);
+                }
+                d.finish()
+            }
+            CrawValue::Closure(_) => write!(f, "<closure>"),
+            CrawValue::List(items) => f.debug_list().entries(items.borrow().iter()).finish(),
+            CrawValue::Tuple(items) => f.debug_list().entries(items.iter()).finish(),
+            CrawValue::Dict(items) => f.debug_map().entries(items.borrow().iter()).finish(),
+            CrawValue::Set(items) => {
+                write!(f, "s")?;
+                f.debug_set().entries(items.borrow().iter()).finish()
+            }
+            CrawValue::Frozenset(items) => {
+                write!(f, "f")?;
+                f.debug_set().entries(items.iter()).finish()
+            }
+            CrawValue::Multiset(items) => {
+                write!(f, "m")?;
+                f.debug_list().entries(items.borrow().iter()).finish()
+            }
+            CrawValue::LazyList(_) => write!(f, "<lazy list>"),
+            CrawValue::Builtin(name) => write!(f, "<builtin {}>", name),
+            CrawValue::Expected(res) => match res {
+                Ok(v) => write!(f, "Expected({:?})", v),
+                Err(e) => write!(f, "Expected(Error: {})", e),
+            },
+            CrawValue::Slice(start, stop, step) => {
+                write!(f, "slice({:?}, {:?}, {:?})", start, stop, step)
+            }
+            CrawValue::Generator(_, _) => write!(f, "<generator>"),
+            CrawValue::Array(arr) => write!(f, "Array({:?}, ...)", arr.dims),
+            CrawValue::Recursive(r) => write!(f, "Recursive({:?})", r.borrow()),
+            CrawValue::Native(_) => write!(f, "<native>"),
+            CrawValue::Formula(lhs, rhs) => write!(f, "Formula({:?}, {:?})", lhs, rhs),
+        }
+    }
+}
+
+fn format_ndarray(arr: &NdArray, f: &mut fmt::Formatter<'_>, debug: bool) -> fmt::Result {
+    if arr.dims.is_empty() {
+        return write!(f, "[]");
+    }
+    if arr.dims.len() == 1 {
+        write!(f, "[")?;
+        for (i, val) in arr.data.borrow().iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            if debug {
+                write!(f, "{:?}", val)?;
+            } else {
+                write!(f, "{}", val)?;
+            }
+        }
+        write!(f, "]")
+    } else if arr.dims.len() == 2 {
+        let rows = arr.dims[0];
+        let cols = arr.dims[1];
+        write!(f, "[")?;
+        for r in 0..rows {
+            if r > 0 {
+                write!(f, "; ")?;
+            }
+            for c in 0..cols {
+                if c > 0 {
+                    write!(f, " ")?;
+                }
+                let val = &arr.data.borrow()[r * cols + c];
+                if debug {
+                    write!(f, "{:?}", val)?;
+                } else {
+                    write!(f, "{}", val)?;
+                }
+            }
+        }
+        write!(f, "]")
+    } else {
+        write!(f, "Array({:?}, ...)", arr.dims)
+    }
+}
+
+impl fmt::Display for CrawValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CrawValue::Int(i) => write!(f, "{}", i),
+            CrawValue::Float(fv) => write!(f, "{}", fv),
+            CrawValue::String(s) => write!(f, "{}", s),
+            CrawValue::Bool(b) => write!(f, "{}", if *b { "True" } else { "False" }),
+            CrawValue::None => write!(f, "None"),
+            CrawValue::Recursive(r) => write!(f, "{}", r.borrow()),
+            CrawValue::List(_) => self.format_list(f, "[", "]"),
+            CrawValue::Tuple(_) => self.format_list(f, "(", ")"),
+            CrawValue::Set(_) => self.format_list(f, "s{", "}"),
+            CrawValue::Frozenset(_) => self.format_list(f, "f{", "}"),
+            CrawValue::Multiset(_) => self.format_list(f, "m[", "]"),
+            CrawValue::Dict(items) => {
+                write!(f, "{{")?;
+                for (i, (k, v)) in items.borrow().iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}: {}", k, v)?;
+                }
+                write!(f, "}}")
+            }
+            CrawValue::Data(name, _, _) => self.format_list(f, &format!("{}(", name), ")"),
+            CrawValue::Closure(_) => write!(f, "<closure>"),
+            CrawValue::Array(arr) => format_ndarray(arr, f, false),
+            CrawValue::Formula(lhs, rhs) => write!(f, "{} ~ {}", lhs, rhs),
+            _ => write!(f, "{:?}", self),
+        }
+    }
+}
+
+pub fn craw_is_truthy(v: &CrawValue) -> bool {
+    match v {
+        CrawValue::Bool(b) => *b,
+        CrawValue::Int(i) => *i != 0,
+        CrawValue::Float(f) => *f != 0.0,
+        CrawValue::None => false,
+        CrawValue::List(l) => !l.borrow().is_empty(),
+        CrawValue::Tuple(t) => !t.is_empty(),
+        CrawValue::Dict(d) => !d.borrow().is_empty(),
+        CrawValue::Set(s) => !s.borrow().is_empty(),
+        CrawValue::Frozenset(s) => !s.is_empty(),
+        CrawValue::Multiset(m) => !m.borrow().is_empty(),
+        CrawValue::String(s) => !s.is_empty(),
+        CrawValue::Recursive(r) => craw_is_truthy(&r.borrow()),
+        _ => true,
+    }
+}
+
+pub fn craw_driver(mut result: CallResult) -> CrawValue {
+    loop {
+        match result {
+            CallResult::Return(val) => return val,
+            CallResult::TailCall(target, args) => {
+                result = craw_call(target, args);
+            }
+            CallResult::MatchError => panic!("MatchError"),
+        }
+    }
+}
+
+pub fn craw_call(target: CrawValue, args: Vec<CrawValue>) -> CallResult {
+    match target {
+        CrawValue::Closure(f) => f(args),
+        CrawValue::Builtin(name) => craw_call_builtin(&name, args),
+        CrawValue::Recursive(r) => craw_call(r.borrow().clone(), args),
+        _ => panic!("TypeError: not callable: {:?}", target),
+    }
+}
+
+pub fn craw_call1(target: CrawValue, a: CrawValue) -> CallResult {
+    match target {
+        CrawValue::Closure(f) => f(vec![a]),
+        CrawValue::Builtin(name) => craw_call_builtin(&name, vec![a]),
+        CrawValue::Recursive(r) => craw_call1(r.borrow().clone(), a),
+        _ => panic!("TypeError: not callable: {:?}", target),
+    }
+}
+
+pub fn craw_broadcast(target: CrawValue, args: Vec<CrawValue>) -> CallResult {
+    let shapes: Vec<Vec<usize>> = args.iter().map(|arg| get_shape(arg)).collect();
+    let target_shape = broadcast_shapes(&shapes);
+    if target_shape.is_empty() {
+        return craw_call(target, args);
+    }
+    let total_size: usize = target_shape.iter().product();
+    let mut results = Vec::with_capacity(total_size);
+    let mut current_indices = vec![0; target_shape.len()];
+    for _ in 0..total_size {
+        let mut current_args = Vec::with_capacity(args.len());
+        for arg in &args {
+            current_args.push(get_broadcasted_item(arg, &target_shape, &current_indices));
+        }
+        results.push(craw_driver(craw_call(target.clone(), current_args)));
+        for i in (0..target_shape.len()).rev() {
+            current_indices[i] += 1;
+            if current_indices[i] < target_shape[i] {
+                break;
+            }
+            current_indices[i] = 0;
+        }
+    }
+    CallResult::Return(CrawValue::Array(NdArray {
+        dims: target_shape,
+        data: Rc::new(RefCell::new(results)),
+    }))
+}
+
+fn get_shape(v: &CrawValue) -> Vec<usize> {
+    match craw_unwrap(v.clone()) {
+        CrawValue::Array(arr) => arr.dims.clone(),
+        CrawValue::List(items) => vec![items.borrow().len()],
+        _ => vec![],
+    }
+}
+
+fn broadcast_shapes(shapes: &[Vec<usize>]) -> Vec<usize> {
+    let max_dims = shapes.iter().map(|s| s.len()).max().unwrap_or(0);
+    let mut target_shape = vec![1; max_dims];
+    for shape in shapes {
+        let offset = max_dims - shape.len();
+        for (i, &dim) in shape.iter().enumerate() {
+            if dim == 1 {
+                continue;
+            }
+            if target_shape[i + offset] == 1 {
+                target_shape[i + offset] = dim;
+            } else if target_shape[i + offset] != dim {
+                panic!("DimensionMismatch");
+            }
+        }
+    }
+    target_shape
+}
+
+fn get_broadcasted_item(v: &CrawValue, target_shape: &[usize], indices: &[usize]) -> CrawValue {
+    let unwrapped = craw_unwrap(v.clone());
+    let shape = get_shape(&unwrapped);
+    if shape.is_empty() {
+        return unwrapped;
+    }
+    let offset = target_shape.len() - shape.len();
+    let mut local_indices = Vec::with_capacity(shape.len());
+    for i in 0..shape.len() {
+        let target_idx = indices[i + offset];
+        if shape[i] == 1 {
+            local_indices.push(0);
+        } else {
+            local_indices.push(target_idx);
+        }
+    }
+    match unwrapped {
+        CrawValue::List(items) => items.borrow()[local_indices[0]].clone(),
+        CrawValue::Array(arr) => {
+            let mut flat_idx = 0;
+            let mut multiplier = 1;
+            for i in (0..arr.dims.len()).rev() {
+                flat_idx += local_indices[i] * multiplier;
+                multiplier *= arr.dims[i];
+            }
+            arr.data.borrow()[flat_idx].clone()
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn craw_call_builtin(name: &str, args: Vec<CrawValue>) -> CallResult {
+    match name {
+        "abs" => {
+            let val = craw_unwrap(args[0].clone());
+            match val {
+                CrawValue::Int(i) => CallResult::Return(CrawValue::Int(i.abs())),
+                CrawValue::Float(f) => CallResult::Return(CrawValue::Float(f.abs())),
+                _ => panic!("TypeError"),
+            }
+        }
+        "add" => CallResult::Return(craw_add2(args[0].clone(), args[1].clone())),
+        "sub" => CallResult::Return(craw_sub2(args[0].clone(), args[1].clone())),
+        "mul" => CallResult::Return(craw_mul2(args[0].clone(), args[1].clone())),
+        "div" => CallResult::Return(craw_div2(args[0].clone(), args[1].clone())),
+        "÷" => CallResult::Return(craw_div_int2(args[0].clone(), args[1].clone())),
+        "mod" => CallResult::Return(craw_mod2(args[0].clone(), args[1].clone())),
+        "sqrt" => CallResult::Return(craw_sqrt(args[0].clone())),
+        "pow" => craw_pow(args),
+        "approx" => craw_approx(args),
+        "eq" => CallResult::Return(craw_eq2(args[0].clone(), args[1].clone())),
+        "ne" => CallResult::Return(craw_ne2(args[0].clone(), args[1].clone())),
+        "lt" => CallResult::Return(craw_lt2(args[0].clone(), args[1].clone())),
+        "le" => CallResult::Return(craw_le2(args[0].clone(), args[1].clone())),
+        "gt" => CallResult::Return(craw_gt2(args[0].clone(), args[1].clone())),
+        "ge" => CallResult::Return(craw_ge2(args[0].clone(), args[1].clone())),
+        "print" | "println" => craw_print(args),
+        "range" => CallResult::Return(craw_range(args)),
+        "enumerate" => craw_enumerate(args),
+        "list" => CallResult::Return(craw_list1(args[0].clone())),
+        "count" | "len" => CallResult::Return(craw_count1(args[0].clone())),
+        "str" => CallResult::Return(CrawValue::String(Rc::new(args[0].to_string()))),
+        "fmap" => craw_fmap(args),
+        "filter" => craw_filter(args),
+        "reduce" => craw_reduce(args),
+        "orderby" => craw_orderby(args),
+        "flatten" => craw_flatten(args),
+        "any" => craw_any(args),
+        "all" => craw_all(args),
+        "sum" => craw_sum(args),
+        "product" => craw_product(args),
+        "hcat" => CallResult::Return(craw_hcat(args)),
+        "vcat" => CallResult::Return(craw_vcat(args)),
+        "hvcat" => CallResult::Return(craw_hvcat(args)),
+        "in" => CallResult::Return(craw_in2(args[0].clone(), args[1].clone())),
+        "notin" => CallResult::Return(craw_notin2(args[0].clone(), args[1].clone())),
+        "next" => craw_next(args),
+        "not" => craw_not(args),
+        _ => panic!("Unknown builtin: {}", name),
+    }
+}
+
+pub fn craw_next(args: Vec<CrawValue>) -> CallResult {
+    if args.is_empty() {
+        panic!("next requires 1 argument");
+    }
+    let val = craw_unwrap(args[0].clone());
+    let res = match val {
+        CrawValue::LazyList(f) => {
+            let items = f();
+            if items.is_empty() {
+                panic!("StopIteration");
+            }
+            items[0].clone()
+        }
+        CrawValue::Generator(rx, tx) => {
+            let tx = tx.lock().unwrap();
+            if let Err(_) = tx.send(()) {
+                panic!("StopIteration");
+            }
+            let rx = rx.lock().unwrap();
+            match rx.recv() {
+                Ok(plain_val) => CrawValue::from_plain(plain_val),
+                Err(_) => panic!("StopIteration"),
+            }
+        }
+        _ => panic!("next requires a generator or lazy list"),
+    };
+    CallResult::Return(res)
+}
+
+pub fn craw_not(args: Vec<CrawValue>) -> CallResult {
+    if args.is_empty() {
+        panic!("not requires 1 argument");
+    }
+    CallResult::Return(CrawValue::Bool(!craw_is_truthy(&args[0])))
+}
+
+pub fn craw_enumerate(args: Vec<CrawValue>) -> CallResult {
+    let target = craw_unwrap(args[0].clone());
+    let enumerated: Vec<CrawValue> = match target {
+        CrawValue::List(l) => l
+            .borrow()
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                CrawValue::List(Rc::new(RefCell::new(vec![
+                    CrawValue::Int(i as i64),
+                    v.clone(),
+                ])))
+            })
+            .collect(),
+        CrawValue::LazyList(f) => f()
+            .into_iter()
+            .enumerate()
+            .map(|(i, v)| {
+                CrawValue::List(Rc::new(RefCell::new(vec![
+                    CrawValue::Int(i as i64),
+                    v.clone(),
+                ])))
+            })
+            .collect(),
+        CrawValue::String(s) => s
+            .chars()
+            .enumerate()
+            .map(|(i, c)| {
+                CrawValue::List(Rc::new(RefCell::new(vec![
+                    CrawValue::Int(i as i64),
+                    CrawValue::String(Rc::new(c.to_string())),
+                ])))
+            })
+            .collect(),
+        _ => panic!("TypeError: enumerate expects a list or string"),
+    };
+    CallResult::Return(CrawValue::List(Rc::new(RefCell::new(enumerated))))
+}
+
+pub fn craw_in2(a: CrawValue, b: CrawValue) -> CrawValue {
+    let a = craw_unwrap(a);
+    match craw_unwrap(b) {
+        CrawValue::List(l) => CrawValue::Bool(l.borrow().iter().any(|i| i == &a)),
+        CrawValue::Set(s) => CrawValue::Bool(s.borrow().contains(&a)),
+        CrawValue::Frozenset(s) => CrawValue::Bool(s.contains(&a)),
+        CrawValue::Multiset(m) => CrawValue::Bool(m.borrow().contains_key(&a)),
+        CrawValue::Dict(d) => CrawValue::Bool(d.borrow().contains_key(&a)),
+        CrawValue::String(s) => CrawValue::Bool(s.contains(&a.to_string())),
+        _ => panic!("TypeError"),
+    }
+}
+
+pub fn craw_notin2(a: CrawValue, b: CrawValue) -> CrawValue {
+    CrawValue::Bool(!craw_is_truthy(&craw_in2(a, b)))
+}
+
+pub fn craw_union2(a: CrawValue, b: CrawValue) -> CrawValue {
+    match (craw_unwrap(a), craw_unwrap(b)) {
+        (CrawValue::Set(av), CrawValue::Set(bv)) => {
+            let mut res = av.borrow().clone();
+            for item in bv.borrow().iter() {
+                res.insert(item.clone());
+            }
+            CrawValue::Set(Rc::new(RefCell::new(res)))
+        }
+        _ => panic!("TypeError: union expects two sets"),
+    }
+}
+
+pub fn craw_intersection2(a: CrawValue, b: CrawValue) -> CrawValue {
+    match (craw_unwrap(a), craw_unwrap(b)) {
+        (CrawValue::Set(av), CrawValue::Set(bv)) => {
+            let mut res = HashSet::new();
+            let b_set = bv.borrow();
+            for item in av.borrow().iter() {
+                if b_set.contains(item) {
+                    res.insert(item.clone());
+                }
+            }
+            CrawValue::Set(Rc::new(RefCell::new(res)))
+        }
+        _ => panic!("TypeError: intersection expects two sets"),
+    }
+}
+
+pub fn craw_subset2(a: CrawValue, b: CrawValue) -> CrawValue {
+    match (craw_unwrap(a), craw_unwrap(b)) {
+        (CrawValue::Set(av), CrawValue::Set(bv)) => {
+            let b_set = bv.borrow();
+            CrawValue::Bool(av.borrow().iter().all(|item| b_set.contains(item)))
+        }
+        _ => panic!("TypeError: subset expects two sets"),
+    }
+}
+
+pub fn craw_superset2(a: CrawValue, b: CrawValue) -> CrawValue {
+    craw_subset2(b, a)
+}
+
+pub fn craw_any(args: Vec<CrawValue>) -> CallResult {
+    let iter = craw_unwrap(args[0].clone());
+    let items = match iter {
+        CrawValue::List(l) => l.borrow().clone(),
+        _ => panic!("TypeError"),
+    };
+    CallResult::Return(CrawValue::Bool(
+        items.into_iter().any(|i| craw_is_truthy(&i)),
+    ))
+}
+
+pub fn craw_all(args: Vec<CrawValue>) -> CallResult {
+    let iter = craw_unwrap(args[0].clone());
+    let items = match iter {
+        CrawValue::List(l) => l.borrow().clone(),
+        _ => panic!("TypeError"),
+    };
+    CallResult::Return(CrawValue::Bool(
+        items.into_iter().all(|i| craw_is_truthy(&i)),
+    ))
+}
+
+pub fn craw_sum(args: Vec<CrawValue>) -> CallResult {
+    let iter = craw_unwrap(args[0].clone());
+    let items = match iter {
+        CrawValue::List(l) => l.borrow().clone(),
+        _ => panic!("TypeError"),
+    };
+    let mut res = CrawValue::Int(0);
+    for i in items {
+        res = craw_add2(res, i);
+    }
+    CallResult::Return(res)
+}
+
+pub fn craw_product(args: Vec<CrawValue>) -> CallResult {
+    let iter = craw_unwrap(args[0].clone());
+    let items = match iter {
+        CrawValue::List(l) => l.borrow().clone(),
+        _ => panic!("TypeError"),
+    };
+    let mut res = CrawValue::Int(1);
+    for i in items {
+        res = craw_mul2(res, i);
+    }
+    CallResult::Return(res)
+}
+
+pub fn craw_flatten(args: Vec<CrawValue>) -> CallResult {
+    let iter = craw_unwrap(args[0].clone());
+    let items = match iter {
+        CrawValue::List(l) => l.borrow().clone(),
+        _ => panic!("TypeError"),
+    };
+    let mut res = Vec::new();
+    for i in items {
+        match craw_unwrap(i) {
+            CrawValue::List(l) => res.extend(l.borrow().iter().cloned()),
+            v => res.push(v),
+        }
+    }
+    CallResult::Return(CrawValue::List(Rc::new(RefCell::new(res))))
+}
+
+pub fn craw_fmap(args: Vec<CrawValue>) -> CallResult {
+    let f = args[0].clone();
+    let iter = craw_unwrap(args[1].clone());
+    let items = match iter {
+        CrawValue::List(l) => l.borrow().clone(),
+        _ => panic!("TypeError"),
+    };
+    let results = items
+        .into_iter()
+        .map(|i| craw_driver(craw_call(f.clone(), vec![i])))
+        .collect();
+    CallResult::Return(CrawValue::List(Rc::new(RefCell::new(results))))
+}
+
+pub fn craw_filter(args: Vec<CrawValue>) -> CallResult {
+    let f = args[0].clone();
+    let iter = craw_unwrap(args[1].clone());
+    let items = match iter {
+        CrawValue::List(l) => l.borrow().clone(),
+        _ => panic!("TypeError"),
+    };
+    let results = items
+        .into_iter()
+        .filter(|i| craw_is_truthy(&craw_driver(craw_call(f.clone(), vec![i.clone()]))))
+        .collect();
+    CallResult::Return(CrawValue::List(Rc::new(RefCell::new(results))))
+}
+
+pub fn craw_orderby(args: Vec<CrawValue>) -> CallResult {
+    let iter = craw_unwrap(args[0].clone());
+    let items = match iter {
+        CrawValue::List(l) => l.borrow().clone(),
+        _ => panic!("TypeError: orderby expects a list"),
+    };
+    if items.is_empty() {
+        return CallResult::Return(CrawValue::List(Rc::new(RefCell::new(vec![]))));
+    }
+    let f = args[1].clone();
+    let ascending = if args.len() > 2 {
+        match args[2] {
+            CrawValue::Bool(b) => b,
+            _ => true,
+        }
+    } else {
+        true
+    };
+
+    let mut tagged: Vec<(CrawValue, CrawValue)> = items
+        .into_iter()
+        .map(|item| {
+            let key = craw_driver(craw_call(f.clone(), vec![item.clone()]));
+            (key, item)
+        })
+        .collect();
+
+    tagged.sort_by(|(a_key, _), (b_key, _)| {
+        let cmp = if craw_is_truthy(&craw_eq2(a_key.clone(), b_key.clone())) {
+            std::cmp::Ordering::Equal
+        } else if craw_is_truthy(&craw_lt2(a_key.clone(), b_key.clone())) {
+            std::cmp::Ordering::Less
+        } else {
+            std::cmp::Ordering::Greater
+        };
+        if ascending { cmp } else { cmp.reverse() }
+    });
+
+    let results: Vec<CrawValue> = tagged.into_iter().map(|(_, item)| item).collect();
+    CallResult::Return(CrawValue::List(Rc::new(RefCell::new(results))))
+}
+
+pub fn craw_reduce(args: Vec<CrawValue>) -> CallResult {
+    let f = args[0].clone();
+    let iter = craw_unwrap(args[1].clone());
+    let items = match iter {
+        CrawValue::List(l) => l.borrow().clone(),
+        _ => panic!("TypeError"),
+    };
+    if items.is_empty() {
+        return CallResult::Return(CrawValue::None);
+    }
+    let mut res = items[0].clone();
+    for i in 1..items.len() {
+        res = craw_driver(craw_call(f.clone(), vec![res, items[i].clone()]));
+    }
+    CallResult::Return(res)
+}
+
+pub fn craw_unwrap(v: CrawValue) -> CrawValue {
+    if let CrawValue::Recursive(r) = v {
+        let mut val = r.borrow().clone();
+        while let CrawValue::Recursive(r2) = val {
+            val = r2.borrow().clone();
+        }
+        val
+    } else {
+        v
+    }
+}
+
+pub fn craw_add2(a: CrawValue, b: CrawValue) -> CrawValue {
+    match (craw_unwrap(a), craw_unwrap(b)) {
+        (CrawValue::Int(av), CrawValue::Int(bv)) => CrawValue::Int(av + bv),
+        (CrawValue::Float(av), CrawValue::Float(bv)) => CrawValue::Float(av + bv),
+        (CrawValue::Int(av), CrawValue::Float(bv)) => CrawValue::Float(av as f64 + bv),
+        (CrawValue::Float(av), CrawValue::Int(bv)) => CrawValue::Float(av + bv as f64),
+        (CrawValue::String(av), bv) => CrawValue::String(Rc::new(format!("{}{}", av, bv))),
+        (av, CrawValue::String(bv)) => CrawValue::String(Rc::new(format!("{}{}", av, bv))),
+        (CrawValue::Multiset(m), v) => {
+            *m.borrow_mut().entry(v).or_insert(0) += 1;
+            CrawValue::Multiset(m)
+        }
+        _ => panic!("TypeError"),
+    }
+}
+
+pub fn craw_sub2(a: CrawValue, b: CrawValue) -> CrawValue {
+    match (craw_unwrap(a), craw_unwrap(b)) {
+        (CrawValue::Int(av), CrawValue::Int(bv)) => CrawValue::Int(av - bv),
+        (CrawValue::Float(av), CrawValue::Float(bv)) => CrawValue::Float(av - bv),
+        (CrawValue::Int(av), CrawValue::Float(bv)) => CrawValue::Float(av as f64 - bv),
+        (CrawValue::Float(av), CrawValue::Int(bv)) => CrawValue::Float(av - bv as f64),
+        _ => panic!("TypeError"),
+    }
+}
+
+pub fn craw_mul2(a: CrawValue, b: CrawValue) -> CrawValue {
+    match (craw_unwrap(a), craw_unwrap(b)) {
+        (CrawValue::Int(av), CrawValue::Int(bv)) => CrawValue::Int(av * bv),
+        (CrawValue::Float(av), CrawValue::Float(bv)) => CrawValue::Float(av * bv),
+        (CrawValue::Int(av), CrawValue::Float(bv)) => CrawValue::Float(av as f64 * bv),
+        (CrawValue::Float(av), CrawValue::Int(bv)) => CrawValue::Float(av * bv as f64),
+        (CrawValue::String(s), CrawValue::Int(n)) => {
+            CrawValue::String(Rc::new(s.repeat(n.max(0) as usize)))
+        }
+        (CrawValue::Int(n), CrawValue::String(s)) => {
+            CrawValue::String(Rc::new(s.repeat(n.max(0) as usize)))
+        }
+        _ => panic!("TypeError"),
+    }
+}
+
+pub fn craw_div2(a: CrawValue, b: CrawValue) -> CrawValue {
+    match (craw_unwrap(a), craw_unwrap(b)) {
+        (CrawValue::Int(av), CrawValue::Int(bv)) => CrawValue::Float(av as f64 / bv as f64),
+        (CrawValue::Float(av), CrawValue::Float(bv)) => CrawValue::Float(av / bv),
+        (CrawValue::Int(av), CrawValue::Float(bv)) => CrawValue::Float(av as f64 / bv),
+        (CrawValue::Float(av), CrawValue::Int(bv)) => CrawValue::Float(av / bv as f64),
+        _ => panic!("TypeError"),
+    }
+}
+
+pub fn craw_div_int2(a: CrawValue, b: CrawValue) -> CrawValue {
+    match (craw_unwrap(a), craw_unwrap(b)) {
+        (CrawValue::Int(av), CrawValue::Int(bv)) => CrawValue::Int(av / bv),
+        (CrawValue::Float(av), CrawValue::Float(bv)) => CrawValue::Float((av / bv).floor()),
+        (CrawValue::Int(av), CrawValue::Float(bv)) => CrawValue::Float((av as f64 / bv).floor()),
+        (CrawValue::Float(av), CrawValue::Int(bv)) => CrawValue::Float((av / bv as f64).floor()),
+        _ => panic!("TypeError"),
+    }
+}
+
+pub fn craw_mod2(a: CrawValue, b: CrawValue) -> CrawValue {
+    match (craw_unwrap(a), craw_unwrap(b)) {
+        (CrawValue::Int(av), CrawValue::Int(bv)) => CrawValue::Int(av % bv),
+        (CrawValue::Float(av), CrawValue::Float(bv)) => CrawValue::Float(av % bv),
+        (CrawValue::Int(av), CrawValue::Float(bv)) => CrawValue::Float(av as f64 % bv),
+        (CrawValue::Float(av), CrawValue::Int(bv)) => CrawValue::Float(av % bv as f64),
+        _ => panic!("TypeError"),
+    }
+}
+
+pub fn craw_is(a: CrawValue, b: CrawValue) -> CrawValue {
+    let a = craw_unwrap(a);
+    let b = craw_unwrap(b);
+    CrawValue::Bool(match (&a, &b) {
+        (CrawValue::Int(av), CrawValue::Int(bv)) => av == bv,
+        (CrawValue::Float(av), CrawValue::Float(bv)) => av.to_bits() == bv.to_bits(),
+        (CrawValue::Bool(av), CrawValue::Bool(bv)) => av == bv,
+        (CrawValue::None, CrawValue::None) => true,
+        (CrawValue::String(av), CrawValue::String(bv)) => Rc::ptr_eq(av, bv),
+        (CrawValue::List(av), CrawValue::List(bv)) => Rc::ptr_eq(av, bv),
+        (CrawValue::Tuple(av), CrawValue::Tuple(bv)) => Rc::ptr_eq(av, bv),
+        (CrawValue::Dict(av), CrawValue::Dict(bv)) => Rc::ptr_eq(av, bv),
+        (CrawValue::Set(av), CrawValue::Set(bv)) => Rc::ptr_eq(av, bv),
+        (CrawValue::Frozenset(av), CrawValue::Frozenset(bv)) => Rc::ptr_eq(av, bv),
+        (CrawValue::Data(_, _, av), CrawValue::Data(_, _, bv)) => Rc::ptr_eq(av, bv),
+        _ => false,
+    })
+}
+
+pub fn craw_eq2(a: CrawValue, b: CrawValue) -> CrawValue {
+    CrawValue::Bool(a == b)
+}
+
+pub fn craw_ne2(a: CrawValue, b: CrawValue) -> CrawValue {
+    CrawValue::Bool(!craw_is_truthy(&craw_eq2(a, b)))
+}
+
+pub fn craw_lt2(a: CrawValue, b: CrawValue) -> CrawValue {
+    CrawValue::Bool(match (craw_unwrap(a), craw_unwrap(b)) {
+        (CrawValue::Int(av), CrawValue::Int(bv)) => av < bv,
+        (CrawValue::Float(av), CrawValue::Float(bv)) => av < bv,
+        (CrawValue::Int(av), CrawValue::Float(bv)) => (av as f64) < bv,
+        (CrawValue::Float(av), CrawValue::Int(bv)) => av < (bv as f64),
+        (CrawValue::String(av), CrawValue::String(bv)) => av < bv,
+        _ => panic!("TypeError"),
+    })
+}
+
+pub fn craw_le2(a: CrawValue, b: CrawValue) -> CrawValue {
+    CrawValue::Bool(match (craw_unwrap(a), craw_unwrap(b)) {
+        (CrawValue::Int(av), CrawValue::Int(bv)) => av <= bv,
+        (CrawValue::Float(av), CrawValue::Float(bv)) => av <= bv,
+        (CrawValue::Int(av), CrawValue::Float(bv)) => (av as f64) <= bv,
+        (CrawValue::Float(av), CrawValue::Int(bv)) => av <= (bv as f64),
+        (CrawValue::String(av), CrawValue::String(bv)) => av <= bv,
+        _ => panic!("TypeError"),
+    })
+}
+
+pub fn craw_gt2(a: CrawValue, b: CrawValue) -> CrawValue {
+    CrawValue::Bool(match (craw_unwrap(a), craw_unwrap(b)) {
+        (CrawValue::Int(av), CrawValue::Int(bv)) => av > bv,
+        (CrawValue::Float(av), CrawValue::Float(bv)) => av > bv,
+        (CrawValue::Int(av), CrawValue::Float(bv)) => (av as f64) > bv,
+        (CrawValue::Float(av), CrawValue::Int(bv)) => av > (bv as f64),
+        (CrawValue::String(av), CrawValue::String(bv)) => av > bv,
+        _ => panic!("TypeError"),
+    })
+}
+
+pub fn craw_ge2(a: CrawValue, b: CrawValue) -> CrawValue {
+    CrawValue::Bool(match (craw_unwrap(a), craw_unwrap(b)) {
+        (CrawValue::Int(av), CrawValue::Int(bv)) => av >= bv,
+        (CrawValue::Float(av), CrawValue::Float(bv)) => av >= bv,
+        (CrawValue::Int(av), CrawValue::Float(bv)) => (av as f64) >= bv,
+        (CrawValue::Float(av), CrawValue::Int(bv)) => av >= (bv as f64),
+        (CrawValue::String(av), CrawValue::String(bv)) => av >= bv,
+        _ => panic!("TypeError"),
+    })
+}
+
+pub fn craw_sqrt(v: CrawValue) -> CrawValue {
+    match craw_unwrap(v) {
+        CrawValue::Int(i) => CrawValue::Float((i as f64).sqrt()),
+        CrawValue::Float(f) => CrawValue::Float(f.sqrt()),
+        _ => panic!("TypeError"),
+    }
+}
+
+pub fn craw_pow(args: Vec<CrawValue>) -> CallResult {
+    CallResult::Return(craw_pow2(args[0].clone(), args[1].clone()))
+}
+
+pub fn craw_approx(args: Vec<CrawValue>) -> CallResult {
+    let a = match args[0] {
+        CrawValue::Float(f) => f,
+        CrawValue::Int(i) => i as f64,
+        _ => panic!(),
+    };
+    let b = match args[1] {
+        CrawValue::Float(f) => f,
+        CrawValue::Int(i) => i as f64,
+        _ => panic!(),
+    };
+    CallResult::Return(CrawValue::Bool((a - b).abs() < 1e-9))
+}
+
+pub fn craw_pow2(a: CrawValue, b: CrawValue) -> CrawValue {
+    match (craw_unwrap(a), craw_unwrap(b)) {
+        (CrawValue::Int(av), CrawValue::Int(bv)) => {
+            if bv < 0 {
+                CrawValue::Float((av as f64).powi(bv as i32))
+            } else {
+                CrawValue::Int(av.pow(bv as u32))
+            }
+        }
+        (CrawValue::Float(av), CrawValue::Float(bv)) => CrawValue::Float(av.powf(bv)),
+        (CrawValue::Int(av), CrawValue::Float(bv)) => CrawValue::Float((av as f64).powf(bv)),
+        (CrawValue::Float(av), CrawValue::Int(bv)) => CrawValue::Float(av.powi(bv as i32)),
+        _ => panic!("TypeError"),
+    }
+}
+
+pub fn craw_print(args: Vec<CrawValue>) -> CallResult {
+    for (i, a) in args.iter().enumerate() {
+        if i > 0 {
+            print!(" ");
+        }
+        print!("{}", a);
+    }
+    println!();
+    CallResult::Return(CrawValue::None)
+}
+
+pub fn craw_to2(a: CrawValue, b: CrawValue) -> CrawValue {
+    craw_range(vec![a, craw_add2(b, CrawValue::Int(1))])
+}
+
+pub fn craw_until2(a: CrawValue, b: CrawValue) -> CrawValue {
+    craw_range(vec![a, b])
+}
+
+pub fn craw_range(args: Vec<CrawValue>) -> CrawValue {
+    let (start, stop, step) = match args.len() {
+        1 => (
+            0,
+            match args[0] {
+                CrawValue::Int(i) => i,
+                _ => panic!(),
+            },
+            1,
+        ),
+        2 => (
+            match args[0] {
+                CrawValue::Int(i) => i,
+                _ => panic!(),
+            },
+            match args[1] {
+                CrawValue::Int(i) => i,
+                _ => panic!(),
+            },
+            1,
+        ),
+        3 => (
+            match args[0] {
+                CrawValue::Int(i) => i,
+                _ => panic!(),
+            },
+            match args[1] {
+                CrawValue::Int(i) => i,
+                _ => panic!(),
+            },
+            match args[2] {
+                CrawValue::Int(i) => i,
+                _ => panic!(),
+            },
+        ),
+        _ => panic!(),
+    };
+    if step == 0 {
+        panic!("ValueError: range() step argument must not be zero");
+    }
+    let mut items = vec![];
+    let mut curr = start;
+    if step > 0 {
+        while curr < stop {
+            items.push(CrawValue::Int(curr));
+            curr += step;
+        }
+    } else {
+        while curr > stop {
+            items.push(CrawValue::Int(curr));
+            curr += step;
+        }
+    }
+    CrawValue::List(Rc::new(RefCell::new(items)))
+}
+
+pub fn craw_count1(v: CrawValue) -> CrawValue {
+    match craw_unwrap(v) {
+        CrawValue::List(l) => CrawValue::Int(l.borrow().len() as i64),
+        CrawValue::Tuple(t) => CrawValue::Int(t.len() as i64),
+        CrawValue::Dict(d) => CrawValue::Int(d.borrow().len() as i64),
+        CrawValue::Set(s) => CrawValue::Int(s.borrow().len() as i64),
+        CrawValue::Frozenset(s) => CrawValue::Int(s.len() as i64),
+        CrawValue::Multiset(m) => {
+            let count: usize = m.borrow().values().sum();
+            CrawValue::Int(count as i64)
+        }
+        CrawValue::String(s) => CrawValue::Int(s.len() as i64),
+        _ => panic!("TypeError"),
+    }
+}
+
+pub fn craw_list1(v: CrawValue) -> CrawValue {
+    let v = craw_unwrap(v);
+    match v {
+        CrawValue::List(_) => v,
+        _ => CrawValue::List(Rc::new(RefCell::new(vec![v]))),
+    }
+}
+
+pub fn craw_calculate_flat_index(dims: &[usize], index: &CrawValue) -> usize {
+    match craw_unwrap(index.clone()) {
+        CrawValue::Int(idx) => idx as usize,
+        CrawValue::List(items) => {
+            let indices: Vec<usize> = items
+                .borrow()
+                .iter()
+                .map(|v| match craw_unwrap(v.clone()) {
+                    CrawValue::Int(idx) => idx as usize,
+                    _ => panic!("IndexError"),
+                })
+                .collect();
+            if indices.len() != dims.len() {
+                panic!("DimensionMismatch");
+            }
+            let mut flat_idx = 0;
+            let mut multiplier = 1;
+            for i in (0..dims.len()).rev() {
+                if indices[i] >= dims[i] {
+                    panic!("IndexError");
+                }
+                flat_idx += indices[i] * multiplier;
+                multiplier *= dims[i];
+            }
+            flat_idx
+        }
+        CrawValue::Tuple(items) => {
+            let indices: Vec<usize> = items
+                .iter()
+                .map(|v| match craw_unwrap(v.clone()) {
+                    CrawValue::Int(idx) => idx as usize,
+                    _ => panic!("IndexError"),
+                })
+                .collect();
+            if indices.len() != dims.len() {
+                panic!("DimensionMismatch");
+            }
+            let mut flat_idx = 0;
+            let mut multiplier = 1;
+            for i in (0..dims.len()).rev() {
+                if indices[i] >= dims[i] {
+                    panic!("IndexError");
+                }
+                flat_idx += indices[i] * multiplier;
+                multiplier *= dims[i];
+            }
+            flat_idx
+        }
+        _ => panic!("TypeError"),
+    }
+}
+
+pub fn craw_get_item(target: CrawValue, index: CrawValue) -> CallResult {
+    let target = craw_unwrap(target);
+    let index = craw_unwrap(index);
+    let res = match (target, index) {
+        (CrawValue::List(items), CrawValue::Int(idx)) => {
+            let items = items.borrow();
+            let len = items.len() as i64;
+            let idx = if idx < 0 { idx + len } else { idx };
+            items[idx as usize].clone()
+        }
+        (CrawValue::Tuple(items), CrawValue::Int(idx)) => {
+            let len = items.len() as i64;
+            let idx = if idx < 0 { idx + len } else { idx };
+            items[idx as usize].clone()
+        }
+        (CrawValue::List(items), CrawValue::Slice(start, stop, step)) => {
+            let items = items.borrow();
+            let len = items.len() as i64;
+            let step = step.unwrap_or(1);
+            if step == 0 {
+                panic!("ValueError: slice step cannot be zero");
+            }
+            let start = start
+                .map(|s| if s < 0 { (s + len).max(0) } else { s.min(len) })
+                .unwrap_or(if step > 0 { 0 } else { len - 1 });
+            let stop = stop
+                .map(|s| if s < 0 { (s + len).max(0) } else { s.min(len) })
+                .unwrap_or(if step > 0 { len } else { -1 });
+            let mut res = Vec::new();
+            let mut curr = start;
+            if step > 0 {
+                while curr < stop {
+                    if curr >= 0 && curr < len {
+                        res.push(items[curr as usize].clone());
+                    }
+                    curr += step;
+                }
+            } else {
+                while curr > stop {
+                    if curr >= 0 && curr < len {
+                        res.push(items[curr as usize].clone());
+                    }
+                    curr += step;
+                }
+            }
+            CrawValue::List(Rc::new(RefCell::new(res)))
+        }
+        (CrawValue::Tuple(items), CrawValue::Slice(start, stop, step)) => {
+            let len = items.len() as i64;
+            let step = step.unwrap_or(1);
+            if step == 0 {
+                panic!("ValueError: slice step cannot be zero");
+            }
+            let start = start
+                .map(|s| if s < 0 { (s + len).max(0) } else { s.min(len) })
+                .unwrap_or(if step > 0 { 0 } else { len - 1 });
+            let stop = stop
+                .map(|s| if s < 0 { (s + len).max(0) } else { s.min(len) })
+                .unwrap_or(if step > 0 { len } else { -1 });
+            let mut res = Vec::new();
+            let mut curr = start;
+            if step > 0 {
+                while curr < stop {
+                    if curr >= 0 && curr < len {
+                        res.push(items[curr as usize].clone());
+                    }
+                    curr += step;
+                }
+            } else {
+                while curr > stop {
+                    if curr >= 0 && curr < len {
+                        res.push(items[curr as usize].clone());
+                    }
+                    curr += step;
+                }
+            }
+            CrawValue::Tuple(Rc::new(res))
+        }
+        (CrawValue::String(s), CrawValue::Int(idx)) => {
+            let chars: Vec<char> = s.chars().collect();
+            let len = chars.len() as i64;
+            let idx = if idx < 0 { idx + len } else { idx };
+            CrawValue::String(Rc::new(chars[idx as usize].to_string()))
+        }
+        (CrawValue::String(s), CrawValue::Slice(start, stop, step)) => {
+            let chars: Vec<char> = s.chars().collect();
+            let len = chars.len() as i64;
+            let step = step.unwrap_or(1);
+            if step == 0 {
+                panic!("ValueError: slice step cannot be zero");
+            }
+            let start = start
+                .map(|s| if s < 0 { (s + len).max(0) } else { s.min(len) })
+                .unwrap_or(if step > 0 { 0 } else { len - 1 });
+            let stop = stop
+                .map(|s| if s < 0 { (s + len).max(0) } else { s.min(len) })
+                .unwrap_or(if step > 0 { len } else { -1 });
+            let mut res = String::new();
+            let mut curr = start;
+            if step > 0 {
+                while curr < stop {
+                    if curr >= 0 && curr < len {
+                        res.push(chars[curr as usize]);
+                    }
+                    curr += step;
+                }
+            } else {
+                while curr > stop {
+                    if curr >= 0 && curr < len {
+                        res.push(chars[curr as usize]);
+                    }
+                    curr += step;
+                }
+            }
+            CrawValue::String(Rc::new(res))
+        }
+        (CrawValue::Dict(items), key) => items.borrow().get(&key).cloned().expect("KeyError"),
+        (CrawValue::List(items), CrawValue::List(idx_list)) => {
+            let items = items.borrow();
+            let indices = idx_list.borrow();
+            if indices.is_empty() {
+                return CallResult::Return(CrawValue::List(Rc::new(RefCell::new(vec![]))));
+            }
+            let res = match indices[0] {
+                CrawValue::Bool(_) => {
+                    let mut res = Vec::new();
+                    for (i, mask) in indices.iter().enumerate() {
+                        if i < items.len() && craw_is_truthy(mask) {
+                            res.push(items[i].clone());
+                        }
+                    }
+                    CrawValue::List(Rc::new(RefCell::new(res)))
+                }
+                CrawValue::Int(_) => {
+                    let mut res = Vec::new();
+                    let len = items.len() as i64;
+                    for idx_val in indices.iter() {
+                        if let CrawValue::Int(idx) = idx_val {
+                            let idx = if *idx < 0 { *idx + len } else { *idx };
+                            if idx >= 0 && idx < len {
+                                res.push(items[idx as usize].clone());
+                            } else {
+                                panic!("IndexError");
+                            }
+                        } else {
+                            panic!("TypeError: mixed indices not supported");
+                        }
+                    }
+                    CrawValue::List(Rc::new(RefCell::new(res)))
+                }
+                _ => panic!("TypeError: unsupported index list type"),
+            };
+            res
+        }
+        (CrawValue::List(items), CrawValue::Closure(f)) => {
+            let items = items.borrow();
+            let mut res = Vec::new();
+            for item in items.iter() {
+                if craw_is_truthy(&craw_driver(f(vec![item.clone()]))) {
+                    res.push(item.clone());
+                }
+            }
+            CrawValue::List(Rc::new(RefCell::new(res)))
+        }
+        (CrawValue::Array(arr), index) => {
+            let flat_idx = craw_calculate_flat_index(&arr.dims, &index);
+            arr.data.borrow()[flat_idx].clone()
+        }
+        _ => panic!("TypeError"),
+    };
+    CallResult::Return(res)
+}
+
+pub fn craw_set_item(target: CrawValue, index: CrawValue, value: CrawValue) {
+    let target = craw_unwrap(target);
+    let index = craw_unwrap(index);
+    match (target, index) {
+        (CrawValue::List(items), CrawValue::Int(idx)) => {
+            let len = items.borrow().len() as i64;
+            let idx = if idx < 0 { idx + len } else { idx };
+            items.borrow_mut()[idx as usize] = value;
+        }
+        (CrawValue::Dict(items), key) => {
+            items.borrow_mut().insert(key, value);
+        }
+        (CrawValue::Array(arr), index) => {
+            let flat_idx = craw_calculate_flat_index(&arr.dims, &index);
+            arr.data.borrow_mut()[flat_idx] = value;
+        }
+        _ => panic!("TypeError"),
+    }
+}
+
+pub fn craw_set_attr(obj: CrawValue, attr: &str, value: CrawValue) -> CallResult {
+    match obj {
+        CrawValue::Dict(m) => {
+            let key = CrawValue::from(attr.to_string());
+            m.borrow_mut().insert(key, value);
+            CallResult::Return(CrawValue::None)
+        }
+        CrawValue::Data(_, names, fields) => {
+            if let Some(idx) = names.iter().position(|n| n == attr) {
+                fields.borrow_mut()[idx] = value;
+                CallResult::Return(CrawValue::None)
+            } else {
+                panic!("AttributeError: field '{}' not found", attr)
+            }
+        }
+        CrawValue::Native(ref _any) => {
+            // This is tricky. In native mode, we'd need to know the type.
+            // But we don't have reflection here.
+            // For now, we only support attribute assignment on Data and Dict.
+            panic!("TypeError: Cannot set attribute on native object");
+        }
+        _ => panic!("TypeError: object does not support attribute assignment"),
+    }
+}
+
+pub fn craw_get_attr(obj: CrawValue, attr: &str) -> CallResult {
+    if let Some(method) = get_builtin_method(&obj, attr) {
+        return CallResult::Return(method);
+    }
+    match obj {
+        CrawValue::Dict(m) => {
+            let key = CrawValue::from(attr.to_string());
+            if let Some(val) = m.borrow().get(&key) {
+                CallResult::Return(val.clone())
+            } else {
+                panic!("AttributeError: '{}' not found", attr)
+            }
+        }
+        CrawValue::Data(_, names, fields) => {
+            if let Some(idx) = names.iter().position(|n| n == attr) {
+                CallResult::Return(fields.borrow()[idx].clone())
+            } else {
+                panic!("AttributeError: field '{}' not found", attr)
+            }
+        }
+        _ => panic!("TypeError: Attribute '{}' not found", attr),
+    }
+}
+
+pub fn get_builtin_method(obj: &CrawValue, attr: &str) -> Option<CrawValue> {
+    match obj {
+        CrawValue::Int(i) => get_int_method(obj, *i, attr),
+        CrawValue::Float(f) => get_float_method(obj, *f, attr),
+        CrawValue::String(s) => get_string_method(obj, s, attr),
+        CrawValue::List(l) => get_list_method(obj, l, attr),
+        CrawValue::Dict(d) => get_dict_method(obj, d, attr),
+        CrawValue::Set(s) => get_set_method(obj, s, attr),
+        CrawValue::Frozenset(s) => get_frozenset_method(obj, s, attr),
+        CrawValue::Multiset(m) => get_multiset_method(obj, m, attr),
+        _ => None,
+    }
+}
+
+fn get_int_method(_obj: &CrawValue, i: i64, attr: &str) -> Option<CrawValue> {
+    match attr {
+        "abs" => Some(CrawValue::Closure(Rc::new(move |_| {
+            CallResult::Return(CrawValue::Int(i.abs()))
+        }))),
+        "Float" => Some(CrawValue::Closure(Rc::new(move |_| {
+            CallResult::Return(CrawValue::Float(i as f64))
+        }))),
+        _ => None,
+    }
+}
+
+fn get_float_method(_obj: &CrawValue, f: f64, attr: &str) -> Option<CrawValue> {
+    match attr {
+        "abs" => Some(CrawValue::Closure(Rc::new(move |_| {
+            CallResult::Return(CrawValue::Float(f.abs()))
+        }))),
+        "Int" => Some(CrawValue::Closure(Rc::new(move |_| {
+            CallResult::Return(CrawValue::Int(f as i64))
+        }))),
+        _ => None,
+    }
+}
+
+fn get_string_method(_obj: &CrawValue, s: &Rc<String>, attr: &str) -> Option<CrawValue> {
+    let s = s.clone();
+    match attr {
+        "len" => Some(CrawValue::Closure(Rc::new(move |_| {
+            CallResult::Return(CrawValue::Int(s.len() as i64))
+        }))),
+        "lower" => Some(CrawValue::Closure(Rc::new(move |_| {
+            CallResult::Return(CrawValue::String(Rc::new(s.to_lowercase())))
+        }))),
+        "upper" => Some(CrawValue::Closure(Rc::new(move |_| {
+            CallResult::Return(CrawValue::String(Rc::new(s.to_uppercase())))
+        }))),
+        "strip" => Some(CrawValue::Closure(Rc::new(move |_| {
+            CallResult::Return(CrawValue::String(Rc::new(s.trim().to_string())))
+        }))),
+        _ => None,
+    }
+}
+
+fn get_list_method(
+    _obj: &CrawValue,
+    l: &Rc<RefCell<Vec<CrawValue>>>,
+    attr: &str,
+) -> Option<CrawValue> {
+    let l = l.clone();
+    match attr {
+        "append" => Some(CrawValue::Closure(Rc::new(move |args| {
+            l.borrow_mut().push(args[0].clone());
+            CallResult::Return(CrawValue::None)
+        }))),
+        "extend" => Some(CrawValue::Closure(Rc::new(move |args| {
+            let other = craw_unwrap(args[0].clone());
+            match other {
+                CrawValue::List(items) => l.borrow_mut().extend(items.borrow().iter().cloned()),
+                CrawValue::Tuple(items) => l.borrow_mut().extend(items.iter().cloned()),
+                _ => panic!("TypeError: extend expects a list or tuple"),
+            }
+            CallResult::Return(CrawValue::None)
+        }))),
+        "insert" => Some(CrawValue::Closure(Rc::new(move |args| {
+            let idx = match args[0] {
+                CrawValue::Int(i) => i as usize,
+                _ => panic!("TypeError: index must be integer"),
+            };
+            let mut items = l.borrow_mut();
+            if idx <= items.len() {
+                items.insert(idx, args[1].clone());
+            } else {
+                items.push(args[1].clone());
+            }
+            CallResult::Return(CrawValue::None)
+        }))),
+        "clear" => Some(CrawValue::Closure(Rc::new(move |_| {
+            l.borrow_mut().clear();
+            CallResult::Return(CrawValue::None)
+        }))),
+        "pop" => Some(CrawValue::Closure(Rc::new(move |args| {
+            let mut items = l.borrow_mut();
+            if items.is_empty() {
+                return CallResult::Return(CrawValue::None);
+            }
+            let res = if args.is_empty() {
+                items.pop().unwrap_or(CrawValue::None)
+            } else {
+                let idx = match args[0] {
+                    CrawValue::Int(i) => i as usize,
+                    _ => panic!("Index must be integer"),
+                };
+                if idx < items.len() {
+                    items.remove(idx)
+                } else {
+                    panic!("Index out of bounds")
+                }
+            };
+            CallResult::Return(res)
+        }))),
+        "len" => Some(CrawValue::Closure(Rc::new(move |_| {
+            CallResult::Return(CrawValue::Int(l.borrow().len() as i64))
+        }))),
+        _ => None,
+    }
+}
+
+fn get_dict_method(
+    _obj: &CrawValue,
+    d: &Rc<RefCell<HashMap<CrawValue, CrawValue>>>,
+    attr: &str,
+) -> Option<CrawValue> {
+    let d = d.clone();
+    match attr {
+        "get" => Some(CrawValue::Closure(Rc::new(move |args| {
+            let key = &args[0];
+            let default = if args.len() > 1 {
+                args[1].clone()
+            } else {
+                CrawValue::None
+            };
+            let res = d.borrow().get(key).cloned().unwrap_or(default);
+            CallResult::Return(res)
+        }))),
+        "pop" => Some(CrawValue::Closure(Rc::new(move |args| {
+            let key = &args[0];
+            let default = if args.len() > 1 {
+                Some(args[1].clone())
+            } else {
+                None
+            };
+            let res = match d.borrow_mut().remove(key) {
+                Some(v) => v,
+                None => default.expect("KeyError"),
+            };
+            CallResult::Return(res)
+        }))),
+        "update" => Some(CrawValue::Closure(Rc::new(move |args| {
+            let other = match &args[0] {
+                CrawValue::Dict(other_d) => other_d.borrow().clone(),
+                _ => panic!("TypeError: update expects a dictionary"),
+            };
+            d.borrow_mut().extend(other);
+            CallResult::Return(CrawValue::None)
+        }))),
+        "items" => Some(CrawValue::Closure(Rc::new(move |_| {
+            let items: Vec<CrawValue> = d
+                .borrow()
+                .iter()
+                .map(|(k, v)| CrawValue::List(Rc::new(RefCell::new(vec![k.clone(), v.clone()]))))
+                .collect();
+            CallResult::Return(CrawValue::List(Rc::new(RefCell::new(items))))
+        }))),
+        "keys" => Some(CrawValue::Closure(Rc::new(move |_| {
+            let keys: Vec<CrawValue> = d.borrow().keys().cloned().collect();
+            CallResult::Return(CrawValue::List(Rc::new(RefCell::new(keys))))
+        }))),
+        "values" => Some(CrawValue::Closure(Rc::new(move |_| {
+            let values: Vec<CrawValue> = d.borrow().values().cloned().collect();
+            CallResult::Return(CrawValue::List(Rc::new(RefCell::new(values))))
+        }))),
+        "len" => Some(CrawValue::Closure(Rc::new(move |_| {
+            CallResult::Return(CrawValue::Int(d.borrow().len() as i64))
+        }))),
+        _ => None,
+    }
+}
+
+fn get_multiset_method(
+    _obj: &CrawValue,
+    m: &Rc<RefCell<HashMap<CrawValue, usize>>>,
+    attr: &str,
+) -> Option<CrawValue> {
+    let m = m.clone();
+    match attr {
+        "add" => Some(CrawValue::Closure(Rc::new(move |args| {
+            let key = args[0].clone();
+            *m.borrow_mut().entry(key).or_insert(0) += 1;
+            CallResult::Return(CrawValue::None)
+        }))),
+        "items" => Some(CrawValue::Closure(Rc::new(move |_| {
+            let mut items = Vec::new();
+            for (val, count) in m.borrow().iter() {
+                for _ in 0..*count {
+                    items.push(val.clone());
+                }
+            }
+            CallResult::Return(CrawValue::List(Rc::new(RefCell::new(items))))
+        }))),
+        _ => None,
+    }
+}
+
+fn get_set_method(
+    _obj: &CrawValue,
+    s: &Rc<RefCell<HashSet<CrawValue>>>,
+    attr: &str,
+) -> Option<CrawValue> {
+    let s = s.clone();
+    match attr {
+        "add" => Some(CrawValue::Closure(Rc::new(move |args| {
+            s.borrow_mut().insert(args[0].clone());
+            CallResult::Return(CrawValue::None)
+        }))),
+        "remove" => Some(CrawValue::Closure(Rc::new(move |args| {
+            if !s.borrow_mut().remove(&args[0]) {
+                panic!("KeyError: element not in set");
+            }
+            CallResult::Return(CrawValue::None)
+        }))),
+        "union" => Some(CrawValue::Closure(Rc::new(move |args| {
+            let mut res = s.borrow().clone();
+            let other = match &args[0] {
+                CrawValue::Set(o) => o.borrow().clone(),
+                CrawValue::Frozenset(o) => o.iter().cloned().collect(),
+                _ => panic!("TypeError: union expects a set or frozenset"),
+            };
+            res.extend(other);
+            CallResult::Return(CrawValue::Set(Rc::new(RefCell::new(res))))
+        }))),
+        "intersection" => Some(CrawValue::Closure(Rc::new(move |args| {
+            let s_ref = s.borrow();
+            let other = match &args[0] {
+                CrawValue::Set(o) => o.borrow().clone(),
+                CrawValue::Frozenset(o) => o.iter().cloned().collect(),
+                _ => panic!("TypeError: intersection expects a set or frozenset"),
+            };
+            let res: HashSet<CrawValue> = s_ref.intersection(&other).cloned().collect();
+            CallResult::Return(CrawValue::Set(Rc::new(RefCell::new(res))))
+        }))),
+        "len" => Some(CrawValue::Closure(Rc::new(move |_| {
+            CallResult::Return(CrawValue::Int(s.borrow().len() as i64))
+        }))),
+        _ => None,
+    }
+}
+
+fn get_frozenset_method(
+    _obj: &CrawValue,
+    s: &Rc<HashSet<CrawValue>>,
+    attr: &str,
+) -> Option<CrawValue> {
+    let s = s.clone();
+    match attr {
+        "union" => Some(CrawValue::Closure(Rc::new(move |args| {
+            let mut res = s.as_ref().clone();
+            let other = match &args[0] {
+                CrawValue::Set(o) => o.borrow().clone(),
+                CrawValue::Frozenset(o) => o.iter().cloned().collect(),
+                _ => panic!("TypeError: union expects a set or frozenset"),
+            };
+            res.extend(other);
+            CallResult::Return(CrawValue::Frozenset(Rc::new(res)))
+        }))),
+        "intersection" => Some(CrawValue::Closure(Rc::new(move |args| {
+            let other = match &args[0] {
+                CrawValue::Set(o) => o.borrow().clone(),
+                CrawValue::Frozenset(o) => o.iter().cloned().collect(),
+                _ => panic!("TypeError: intersection expects a set or frozenset"),
+            };
+            let res: HashSet<CrawValue> = s.intersection(&other).cloned().collect();
+            CallResult::Return(CrawValue::Frozenset(Rc::new(res)))
+        }))),
+        "len" => Some(CrawValue::Closure(Rc::new(move |_| {
+            CallResult::Return(CrawValue::Int(s.len() as i64))
+        }))),
+        _ => None,
+    }
+}
+
+pub fn craw_ufcs_call(
+    obj: CrawValue,
+    name: &str,
+    args: Vec<CrawValue>,
+    fallback: Option<CrawValue>,
+) -> CallResult {
+    if let Some(method) = get_builtin_method(&obj, name) {
+        return craw_call(method, args);
+    }
+    if let Some(f) = fallback {
+        let fa = if name == "filter" || name == "fmap" || name == "reduce" {
+            let mut a = vec![args[0].clone(), obj];
+            a.extend(args[1..].iter().cloned());
+            a
+        } else {
+            let mut fa = vec![obj];
+            fa.extend(args);
+            fa
+        };
+        return craw_call(f, fa);
+    }
+    panic!("AttributeError: {}", name);
+}
+
+fn value_to_ndarray(v: CrawValue) -> NdArray {
+    match v {
+        CrawValue::Array(arr) => arr.clone(),
+        CrawValue::List(items) => NdArray {
+            dims: vec![items.borrow().len(), 1],
+            data: items.clone(),
+        },
+        _ => NdArray {
+            dims: vec![1, 1],
+            data: Rc::new(RefCell::new(vec![v])),
+        },
+    }
+}
+
+pub fn craw_hcat(args: Vec<CrawValue>) -> CrawValue {
+    if args.is_empty() {
+        return CrawValue::Array(NdArray {
+            dims: vec![0, 0],
+            data: Rc::new(RefCell::new(vec![])),
+        });
+    }
+    let arrays: Vec<NdArray> = args.into_iter().map(value_to_ndarray).collect();
+    let rows = arrays[0].dims[0];
+    for arr in &arrays {
+        if arr.dims[0] != rows {
+            panic!("DimensionMismatch");
+        }
+    }
+    let total_cols: usize = arrays
+        .iter()
+        .map(|a| if a.dims.len() > 1 { a.dims[1] } else { 1 })
+        .sum();
+    let mut data = Vec::with_capacity(rows * total_cols);
+    for r in 0..rows {
+        for arr in &arrays {
+            let cols = if arr.dims.len() > 1 { arr.dims[1] } else { 1 };
+            for c in 0..cols {
+                data.push(arr.data.borrow()[r * cols + c].clone());
+            }
+        }
+    }
+    CrawValue::Array(NdArray {
+        dims: vec![rows, total_cols],
+        data: Rc::new(RefCell::new(data)),
+    })
+}
+
+pub fn craw_vcat(args: Vec<CrawValue>) -> CrawValue {
+    if args.is_empty() {
+        return CrawValue::Array(NdArray {
+            dims: vec![0, 0],
+            data: Rc::new(RefCell::new(vec![])),
+        });
+    }
+    let arrays: Vec<NdArray> = args.into_iter().map(value_to_ndarray).collect();
+    let cols = if arrays[0].dims.len() > 1 {
+        arrays[0].dims[1]
+    } else {
+        1
+    };
+    for arr in &arrays {
+        let c = if arr.dims.len() > 1 { arr.dims[1] } else { 1 };
+        if c != cols {
+            panic!("DimensionMismatch");
+        }
+    }
+    let total_rows: usize = arrays.iter().map(|a| a.dims[0]).sum();
+    let mut data = Vec::with_capacity(total_rows * cols);
+    for arr in arrays {
+        data.extend(arr.data.borrow().iter().cloned());
+    }
+    CrawValue::Array(NdArray {
+        dims: vec![total_rows, cols],
+        data: Rc::new(RefCell::new(data)),
+    })
+}
+
+pub fn craw_hvcat(args: Vec<CrawValue>) -> CrawValue {
+    let mut rows = Vec::new();
+    for arg in args {
+        let row_args = match arg {
+            CrawValue::List(items) => items.borrow().clone(),
+            _ => vec![arg],
+        };
+        rows.push(craw_hcat(row_args));
+    }
+    craw_vcat(rows)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    fn calculate_hash<T: Hash>(t: &T) -> u64 {
+        let mut s = DefaultHasher::new();
+        t.hash(&mut s);
+        s.finish()
+    }
+
+    #[test]
+    fn test_equality() {
+        let i1 = CrawValue::Int(1);
+        let f1 = CrawValue::Float(1.0);
+        let f1_1 = CrawValue::Float(1.1);
+        let s1 = CrawValue::String(Rc::new("1".to_string()));
+        let b1 = CrawValue::Bool(true);
+        let none = CrawValue::None;
+
+        assert!(i1 == f1);
+        assert!(f1 == i1);
+        assert!(i1 != f1_1);
+        assert!(i1 != s1);
+        assert!(b1 != i1);
+        assert!(none == CrawValue::None);
+    }
+
+    #[test]
+    fn test_hashing() {
+        let i1 = CrawValue::Int(1);
+        let f1 = CrawValue::Float(1.0);
+        assert_eq!(calculate_hash(&i1), calculate_hash(&f1));
+
+        let s1 = CrawValue::String(Rc::new("hi".to_string()));
+        let s2 = CrawValue::String(Rc::new("hi".to_string()));
+        assert_eq!(calculate_hash(&s1), calculate_hash(&s2));
+    }
+
+    #[test]
+    #[should_panic(expected = "TypeError: unhashable type")]
+    fn test_unhashable_list() {
+        let l = CrawValue::List(Rc::new(RefCell::new(vec![CrawValue::Int(1)])));
+        calculate_hash(&l);
+    }
+
+    #[test]
+    fn test_tuple_equality_and_hashing() {
+        let t1 = CrawValue::Tuple(Rc::new(vec![CrawValue::Int(1), CrawValue::Int(2)]));
+        let t2 = CrawValue::Tuple(Rc::new(vec![CrawValue::Int(1), CrawValue::Int(2)]));
+        let t3 = CrawValue::Tuple(Rc::new(vec![CrawValue::Int(2), CrawValue::Int(1)]));
+
+        assert!(t1 == t2);
+        assert!(t1 != t3);
+        assert_eq!(calculate_hash(&t1), calculate_hash(&t2));
+    }
+
+    #[test]
+    fn test_frozenset_equality_and_hashing() {
+        let s1 = CrawValue::Frozenset(Rc::new(HashSet::from_iter(vec![
+            CrawValue::Int(1),
+            CrawValue::Int(2),
+        ])));
+        let s2 = CrawValue::Frozenset(Rc::new(HashSet::from_iter(vec![
+            CrawValue::Int(2),
+            CrawValue::Int(1),
+        ])));
+        let s3 = CrawValue::Frozenset(Rc::new(HashSet::from_iter(vec![
+            CrawValue::Int(1),
+            CrawValue::Int(3),
+        ])));
+
+        assert!(s1 == s2);
+        assert!(s1 != s3);
+        assert_eq!(calculate_hash(&s1), calculate_hash(&s2));
+    }
+
+    #[test]
+    fn test_list_methods() {
+        let l = CrawValue::List(Rc::new(RefCell::new(vec![CrawValue::Int(1)])));
+        let append = get_list_method(
+            &l,
+            match &l {
+                CrawValue::List(x) => x,
+                _ => unreachable!(),
+            },
+            "append",
+        )
+        .unwrap();
+        craw_driver(craw_call(append, vec![CrawValue::Int(2)]));
+        assert_eq!(craw_count1(l.clone()), CrawValue::Int(2));
+
+        let extend = get_list_method(
+            &l,
+            match &l {
+                CrawValue::List(x) => x,
+                _ => unreachable!(),
+            },
+            "extend",
+        )
+        .unwrap();
+        craw_driver(craw_call(
+            extend,
+            vec![CrawValue::List(Rc::new(RefCell::new(vec![
+                CrawValue::Int(3),
+                CrawValue::Int(4),
+            ])))],
+        ));
+        assert_eq!(craw_count1(l.clone()), CrawValue::Int(4));
+
+        let insert = get_list_method(
+            &l,
+            match &l {
+                CrawValue::List(x) => x,
+                _ => unreachable!(),
+            },
+            "insert",
+        )
+        .unwrap();
+        craw_driver(craw_call(
+            insert,
+            vec![CrawValue::Int(0), CrawValue::Int(0)],
+        ));
+        assert_eq!(
+            craw_driver(craw_get_item(l.clone(), CrawValue::Int(0))),
+            CrawValue::Int(0)
+        );
+
+        let clear = get_list_method(
+            &l,
+            match &l {
+                CrawValue::List(x) => x,
+                _ => unreachable!(),
+            },
+            "clear",
+        )
+        .unwrap();
+        craw_driver(craw_call(clear, vec![]));
+        assert_eq!(craw_count1(l.clone()), CrawValue::Int(0));
+    }
+
+    #[test]
+    fn test_dict_methods() {
+        let d = CrawValue::Dict(Rc::new(RefCell::new(HashMap::new())));
+        craw_set_item(
+            d.clone(),
+            CrawValue::String(Rc::new("a".to_string())),
+            CrawValue::Int(1),
+        );
+
+        let pop = get_dict_method(
+            &d,
+            match &d {
+                CrawValue::Dict(x) => x,
+                _ => unreachable!(),
+            },
+            "pop",
+        )
+        .unwrap();
+        let res = craw_driver(craw_call(
+            pop.clone(),
+            vec![CrawValue::String(Rc::new("a".to_string()))],
+        ));
+        assert_eq!(res, CrawValue::Int(1));
+        assert_eq!(craw_count1(d.clone()), CrawValue::Int(0));
+
+        let update = get_dict_method(
+            &d,
+            match &d {
+                CrawValue::Dict(x) => x,
+                _ => unreachable!(),
+            },
+            "update",
+        )
+        .unwrap();
+        let mut d2_map = HashMap::new();
+        d2_map.insert(
+            CrawValue::String(Rc::new("b".to_string())),
+            CrawValue::Int(2),
+        );
+        craw_driver(craw_call(
+            update,
+            vec![CrawValue::Dict(Rc::new(RefCell::new(d2_map)))],
+        ));
+        assert_eq!(craw_count1(d.clone()), CrawValue::Int(1));
+    }
+
+    #[test]
+    fn test_set_methods() {
+        let s = CrawValue::Set(Rc::new(RefCell::new(HashSet::new())));
+        let add = get_set_method(
+            &s,
+            match &s {
+                CrawValue::Set(x) => x,
+                _ => unreachable!(),
+            },
+            "add",
+        )
+        .unwrap();
+        craw_driver(craw_call(add, vec![CrawValue::Int(1)]));
+        assert_eq!(craw_count1(s.clone()), CrawValue::Int(1));
+
+        let union = get_set_method(
+            &s,
+            match &s {
+                CrawValue::Set(x) => x,
+                _ => unreachable!(),
+            },
+            "union",
+        )
+        .unwrap();
+        let mut s2_set = HashSet::new();
+        s2_set.insert(CrawValue::Int(2));
+        let s3 = craw_driver(craw_call(
+            union,
+            vec![CrawValue::Set(Rc::new(RefCell::new(s2_set)))],
+        ));
+        assert_eq!(craw_count1(s3), CrawValue::Int(2));
+    }
+
+    #[test]
+    fn test_dict_generic_keys() {
+        let mut d = HashMap::new();
+        let k1 = CrawValue::Int(1);
+        let v1 = CrawValue::String(Rc::new("one".to_string()));
+        let k2 = CrawValue::Tuple(Rc::new(vec![CrawValue::Int(2), CrawValue::Int(3)]));
+        let v2 = CrawValue::String(Rc::new("two-three".to_string()));
+
+        d.insert(k1.clone(), v1.clone());
+        d.insert(k2.clone(), v2.clone());
+
+        let dict = CrawValue::Dict(Rc::new(RefCell::new(d)));
+
+        assert_eq!(craw_driver(craw_get_item(dict.clone(), k1)), v1);
+        assert_eq!(craw_driver(craw_get_item(dict.clone(), k2)), v2);
+    }
+}

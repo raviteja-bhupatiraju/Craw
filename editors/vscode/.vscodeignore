@@ -1,0 +1,10 @@
+.vscodetest/
+src/
+.gitignore
+tsconfig.json
+**/*.map
+package-lock.json
+Cargo.toml
+Cargo.lock
+target/
+*.vsix
