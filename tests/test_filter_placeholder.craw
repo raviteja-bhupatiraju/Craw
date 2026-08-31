@@ -1,7 +1,7 @@
 def main():
     l = [True, False, True]
-    f = filter(?, l)
-    print("filter(?, [True, False, True]):", f)
+    f = filter(x => x, l)
+    print("filter(x => x, [True, False, True]):", f)
     print("len:", f.len())
 
 main()

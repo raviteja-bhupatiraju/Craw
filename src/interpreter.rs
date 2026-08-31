@@ -1,14 +1,53 @@
-use crate::ast::{Expr, Pattern, Stmt};
+use crate::ast::{CallStyle, Expr, Pattern, Stmt};
 use crate::runtime::{
-    CallResult, CrawValue, craw_add2, craw_call, craw_div2, craw_eq2, craw_ge2, craw_get_attr,
-    craw_get_item, craw_gt2, craw_in2, craw_is_truthy, craw_le2, craw_lt2, craw_mod2, craw_mul2,
-    craw_ne2, craw_notin2, craw_pow2, craw_set_attr, craw_set_item, craw_sub2, craw_to2,
-    craw_unwrap,
+    CallResult, CrawValue, PlainCrawValue, craw_add2, craw_call, craw_div2, craw_div_int2,
+    craw_driver, craw_eq2, craw_ge2, craw_get_attr, craw_get_item, craw_gt2, craw_hcat, craw_in2,
+    craw_intersection2, craw_is_truthy, craw_le2, craw_lt2, craw_mod2, craw_mul2, craw_ne2,
+    craw_notin2, craw_pow2, craw_set_attr, craw_set_item, craw_sub2, craw_subset2,
+    craw_superset2, craw_to2, craw_union2, craw_unwrap, craw_until2, craw_vcat,
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex, mpsc};
+
+/// Wraps a value that is provably single-owner across the handoff to a
+/// spawned generator thread (see `GEN_CHANNEL`), so it never sees concurrent
+/// access despite containing non-`Send` `Rc`/`RefCell` data.
+struct ForceSend<T>(T);
+unsafe impl<T> Send for ForceSend<T> {}
+
+// Set only inside a generator's dedicated OS thread (see `Stmt::FunctionDef`
+// with `is_generator`), so `Stmt::Yield` can find its handshake channels
+// without threading them through every `exec_stmt`/`eval_expr` call.
+thread_local! {
+    static GEN_CHANNEL: RefCell<Option<(mpsc::Sender<PlainCrawValue>, mpsc::Receiver<()>)>> =
+        const { RefCell::new(None) };
+}
+
+type GeneratorPayload = ForceSend<(
+    Scope,
+    Vec<Stmt>,
+    mpsc::Sender<PlainCrawValue>,
+    mpsc::Receiver<()>,
+)>;
+
+// Taking `ForceSend<T>` by value (rather than destructuring a captured
+// variable inline inside the spawned closure) keeps rustc's 2021 precise
+// closure captures from reaching past the wrapper into its non-`Send` field.
+fn run_generator_body(payload: GeneratorPayload) {
+    let ForceSend((mut local_scope, body, v_tx, c_rx)) = payload;
+    GEN_CHANNEL.with(|cell| *cell.borrow_mut() = Some((v_tx, c_rx)));
+    for s in &body {
+        match exec_stmt(s, &mut local_scope) {
+            Ok(ControlFlow::Return(_)) | Ok(ControlFlow::Break) => break,
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    GEN_CHANNEL.with(|cell| *cell.borrow_mut() = None);
+}
 
 #[derive(Clone)]
 pub struct Scope {
@@ -119,16 +158,23 @@ pub fn eval_expr(expr: &Expr, scope: &mut Scope) -> Result<CrawValue, String> {
                 "-" => Ok(craw_sub2(l, r)),
                 "*" => Ok(craw_mul2(l, r)),
                 "/" => Ok(craw_div2(l, r)),
+                "÷" => Ok(craw_div_int2(l, r)),
                 "%" => Ok(craw_mod2(l, r)),
                 "**" => Ok(craw_pow2(l, r)),
                 "==" => Ok(craw_eq2(l, r)),
-                "!=" => Ok(craw_ne2(l, r)),
+                "!=" | "≠" => Ok(craw_ne2(l, r)),
                 "<" => Ok(craw_lt2(l, r)),
-                "<=" => Ok(craw_le2(l, r)),
+                "<=" | "≤" => Ok(craw_le2(l, r)),
                 ">" => Ok(craw_gt2(l, r)),
-                ">=" => Ok(craw_ge2(l, r)),
-                "in" => Ok(craw_in2(l, r)),
-                "notin" => Ok(craw_notin2(l, r)),
+                ">=" | "≥" => Ok(craw_ge2(l, r)),
+                "in" | "∈" => Ok(craw_in2(l, r)),
+                "notin" | "∉" => Ok(craw_notin2(l, r)),
+                "|" | "∪" => Ok(craw_union2(l, r)),
+                "&" | "∩" => Ok(craw_intersection2(l, r)),
+                "⊆" => Ok(craw_subset2(l, r)),
+                "⊇" => Ok(craw_superset2(l, r)),
+                "to" => Ok(craw_to2(l, r)),
+                "until" => Ok(craw_until2(l, r)),
                 _ => Err(format!("Unknown operator: {}", op)),
             }
         }
@@ -350,7 +396,7 @@ pub fn eval_expr(expr: &Expr, scope: &mut Scope) -> Result<CrawValue, String> {
             };
             Ok(CrawValue::Closure(Rc::new(closure)))
         }
-        Expr::Comprehension(expr, pat, iterable, is_lazy, _id) => {
+        Expr::Comprehension(expr, pat, iterable, is_lazy, _id, filter) => {
             if *is_lazy {
                 return Err("Interpreter does not yet support lazy comprehensions".to_string());
             }
@@ -362,17 +408,75 @@ pub fn eval_expr(expr: &Expr, scope: &mut Scope) -> Result<CrawValue, String> {
             let mut results = Vec::new();
             for item in items {
                 scope.push_frame();
-                let result = (|| -> Result<CrawValue, String> {
-                    if bind_pattern(pat, &item, scope)? {
-                        eval_expr(expr, scope)
-                    } else {
-                        Ok(CrawValue::None)
+                let result = (|| -> Result<Option<CrawValue>, String> {
+                    if !bind_pattern(pat, &item, scope)? {
+                        return Ok(None);
                     }
+                    if let Some(filter_expr) = filter
+                        && !craw_is_truthy(&eval_expr(filter_expr, scope)?)
+                    {
+                        return Ok(None);
+                    }
+                    eval_expr(expr, scope).map(Some)
                 })();
                 scope.pop_frame();
-                results.push(result?);
+                if let Some(v) = result? {
+                    results.push(v);
+                }
             }
             Ok(CrawValue::List(Rc::new(RefCell::new(results))))
+        }
+        Expr::Pipe(left, data, right) => {
+            let l = eval_expr(left, scope)?;
+            if data.none_aware && matches!(l, CrawValue::None) {
+                return Ok(CrawValue::None);
+            }
+            let right_val = eval_expr(right, scope)?;
+            let args = match data.style {
+                CallStyle::Standard => vec![l],
+                CallStyle::Star => match l {
+                    CrawValue::List(items) => items.borrow().clone(),
+                    _ => return Err("TypeError: star pipe expects a list".to_string()),
+                },
+                CallStyle::DoubleStar => match l {
+                    CrawValue::Dict(items) => items.borrow().values().cloned().collect(),
+                    _ => return Err("TypeError: double star pipe expects a dict".to_string()),
+                },
+            };
+            match craw_call(right_val, args) {
+                CallResult::Return(v) => Ok(v),
+                _ => Err("Pipe call failed".to_string()),
+            }
+        }
+        Expr::Hcat(items) => {
+            let mut vals = Vec::new();
+            for item in items {
+                vals.push(eval_expr(item, scope)?);
+            }
+            Ok(craw_hcat(vals))
+        }
+        Expr::Vcat(items) => {
+            let mut vals = Vec::new();
+            for item in items {
+                vals.push(eval_expr(item, scope)?);
+            }
+            Ok(craw_vcat(vals))
+        }
+        // Inline Rust blocks are a compile-time/transpiler-only feature (there
+        // is no Rust compiler embedded in the interpreter), matching how
+        // `Stmt::TemplateDef`/`MacroDef` are already treated below. A numeric
+        // placeholder (rather than None) keeps arithmetic on the result
+        // (e.g. measuring elapsed time around a passthrough block) from
+        // hard-panicking under the interpreter.
+        Expr::Passthrough(_) => Ok(CrawValue::Float(0.0)),
+        Expr::Compose(left, _data, right, _id) => {
+            let left_val = eval_expr(left, scope)?;
+            let right_val = eval_expr(right, scope)?;
+            let closure = move |args: Vec<CrawValue>| {
+                let inner = craw_driver(craw_call(right_val.clone(), args));
+                craw_call(left_val.clone(), vec![inner])
+            };
+            Ok(CrawValue::Closure(Rc::new(closure)))
         }
         _ => Err(format!(
             "Interpreter does not yet support expression: {:?}",
@@ -488,19 +592,23 @@ pub fn exec_stmt(stmt: &Stmt, scope: &mut Scope) -> Result<ControlFlow, String> 
         Stmt::FunctionDef {
             name,
             args,
+            vararg,
             body,
             is_copyclosure,
+            is_generator,
             ..
         } => {
             let name = name.last().unwrap().clone();
             let body = body.clone();
             let args = args.clone();
+            let vararg = vararg.clone();
             let globals = scope.globals.clone();
             let current_locals = if *is_copyclosure {
                 deep_clone_locals(&scope.locals)
             } else {
                 scope.locals.clone()
             };
+            let is_generator = *is_generator;
 
             let closure = move |actual_args: Vec<CrawValue>| {
                 let mut local_scope = Scope {
@@ -508,13 +616,44 @@ pub fn exec_stmt(stmt: &Stmt, scope: &mut Scope) -> Result<ControlFlow, String> 
                     locals: current_locals.clone(),
                 };
                 local_scope.push_frame();
-                for (i, (arg_pat, _)) in args.iter().enumerate() {
+                for (i, (arg_pat, default)) in args.iter().enumerate() {
                     if i < actual_args.len() {
                         if let Err(e) = bind_pattern(arg_pat, &actual_args[i], &mut local_scope) {
                             panic!("Runtime error in pattern binding: {}", e);
                         }
+                    } else if let Some(default_expr) = default {
+                        let default_val = match eval_expr(default_expr, &mut local_scope) {
+                            Ok(v) => v,
+                            Err(e) => panic!("Runtime error evaluating default argument: {}", e),
+                        };
+                        if let Err(e) = bind_pattern(arg_pat, &default_val, &mut local_scope) {
+                            panic!("Runtime error in pattern binding: {}", e);
+                        }
                     }
                 }
+                if let Some(vararg_name) = &vararg {
+                    let extra = if actual_args.len() > args.len() {
+                        actual_args[args.len()..].to_vec()
+                    } else {
+                        Vec::new()
+                    };
+                    local_scope.set(
+                        vararg_name.clone(),
+                        CrawValue::List(Rc::new(RefCell::new(extra))),
+                    );
+                }
+
+                if is_generator {
+                    let (v_tx, v_rx) = mpsc::channel::<PlainCrawValue>();
+                    let (c_tx, c_rx) = mpsc::channel::<()>();
+                    let payload = ForceSend((local_scope, body.clone(), v_tx, c_rx));
+                    std::thread::spawn(move || run_generator_body(payload));
+                    return CallResult::Return(CrawValue::Generator(
+                        Arc::new(Mutex::new(v_rx)),
+                        Arc::new(Mutex::new(c_tx)),
+                    ));
+                }
+
                 for s in &body {
                     match exec_stmt(s, &mut local_scope) {
                         Ok(ControlFlow::Return(v)) => return CallResult::Return(v),
@@ -550,6 +689,22 @@ pub fn exec_stmt(stmt: &Stmt, scope: &mut Scope) -> Result<ControlFlow, String> 
             Ok(ControlFlow::None)
         }
         Stmt::Passthrough(_) | Stmt::Use(_) => Ok(ControlFlow::None),
+        Stmt::Yield(expr) => {
+            let val = eval_expr(expr, scope)?;
+            let plain = val.to_plain();
+            let stopped = GEN_CHANNEL.with(|cell| {
+                let mut opt = cell.borrow_mut();
+                match opt.as_mut() {
+                    Some((tx, rx)) => rx.recv().is_err() || tx.send(plain).is_err(),
+                    None => true,
+                }
+            });
+            if stopped {
+                return Err("__generator_stopped__".to_string());
+            }
+            Ok(ControlFlow::None)
+        }
+        Stmt::Nonlocal(_) | Stmt::Global(_) => Ok(ControlFlow::None),
         _ => Err(format!(
             "Interpreter does not yet support statement: {:?}",
             stmt

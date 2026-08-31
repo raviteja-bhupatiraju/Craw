@@ -780,6 +780,9 @@ impl Lexer {
                         if self.peek() == Some('=') {
                             tokens.push(Token::SlashAssign);
                             self.advance();
+                        } else if self.peek() == Some('/') {
+                            self.advance();
+                            tokens.push(Token::Operator("÷".to_string()));
                         } else {
                             tokens.push(Token::Slash);
                         }

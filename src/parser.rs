@@ -93,13 +93,15 @@ where
             .then(pattern.clone())
             .then_ignore(just(Token::In))
             .then(expr.clone())
-            .map_with(|((e, p), i), extra| {
+            .then(just(Token::If).ignore_then(expr.clone()).or_not())
+            .map_with(|(((e, p), i), filter), extra| {
                 Expr::Comprehension(
                     Box::new(e),
                     Box::new(p),
                     Box::new(i),
                     false,
                     extra.span().start,
+                    filter.map(Box::new),
                 )
             });
 
@@ -170,7 +172,9 @@ where
             }),
             choice((
                 comprehension.clone().map(|comp| match comp {
-                    Expr::Comprehension(e, p, i, _, id) => Expr::Comprehension(e, p, i, true, id),
+                    Expr::Comprehension(e, p, i, _, id, filter) => {
+                        Expr::Comprehension(e, p, i, true, id, filter)
+                    }
                     _ => unreachable!(),
                 }),
                 expr_full.clone(),
@@ -655,10 +659,13 @@ where
             .boxed();
 
         let lambda = choice((
-            just(Token::Lambda)
-                .ignore_then(ident.separated_by(just(Token::Comma)).collect())
-                .then_ignore(just(Token::Colon))
-                .then(expr.clone()),
+            choice((
+                just(Token::Lambda),
+                just(Token::Ident("λ".to_string())).to(Token::Lambda),
+            ))
+            .ignore_then(ident.separated_by(just(Token::Comma)).collect())
+            .then_ignore(just(Token::Colon))
+            .then(expr.clone()),
             just(Token::At)
                 .ignore_then(ident.separated_by(just(Token::Comma)).collect())
                 .then_ignore(just(Token::ThinArrow))
@@ -1534,12 +1541,13 @@ fn replace_placeholders(expr: Expr) -> Expr {
             Box::new(Expr::Ident("_".to_string())),
             Box::new(replace_placeholders(*idx)),
         ),
-        Expr::Comprehension(e, p, i, is_lazy, id) => Expr::Comprehension(
+        Expr::Comprehension(e, p, i, is_lazy, id, filter) => Expr::Comprehension(
             Box::new(replace_placeholders(*e)),
             p,
             Box::new(replace_placeholders(*i)),
             is_lazy,
             id,
+            filter.map(|f| Box::new(replace_placeholders(*f))),
         ),
         Expr::Hcat(exprs) => Expr::Hcat(exprs.into_iter().map(replace_placeholders).collect()),
         Expr::Vcat(exprs) => Expr::Vcat(exprs.into_iter().map(replace_placeholders).collect()),
@@ -1631,7 +1639,11 @@ fn contains_placeholder(expr: &Expr) -> bool {
         }
         Expr::LazyList(exprs, _) => exprs.iter().any(contains_placeholder),
         Expr::IndexPartial(_) => true,
-        Expr::Comprehension(e, _, i, _, _) => contains_placeholder(e) || contains_placeholder(i),
+        Expr::Comprehension(e, _, i, _, _, filter) => {
+            contains_placeholder(e)
+                || contains_placeholder(i)
+                || filter.as_deref().is_some_and(contains_placeholder)
+        }
         Expr::Hcat(exprs) => exprs.iter().any(contains_placeholder),
         Expr::Vcat(exprs) => exprs.iter().any(contains_placeholder),
         Expr::Splat(e) => contains_placeholder(e),
@@ -1881,6 +1893,7 @@ mod tests {
                     Box::new(Expr::Ident("y".to_string())),
                     false,
                     1,
+                    None,
                 ),
             ),
             (

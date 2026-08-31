@@ -410,12 +410,13 @@ impl TemplateExpander {
                 self.expand_block(stmts),
                 id,
             ),
-            Expr::Comprehension(expr, pat, iterable, is_lazy, id) => Expr::Comprehension(
+            Expr::Comprehension(expr, pat, iterable, is_lazy, id, filter) => Expr::Comprehension(
                 Box::new(self.expand_expr(*expr)),
                 Box::new(self.expand_pattern(*pat)),
                 Box::new(self.expand_expr(*iterable)),
                 is_lazy,
                 id,
+                filter.map(|f| Box::new(self.expand_expr(*f))),
             ),
             Expr::MacroCall(name, args) => Expr::MacroCall(
                 name,
@@ -451,7 +452,7 @@ impl TemplateExpander {
         }
     }
 
-    fn substitute_pattern(&self, pat: Pattern, mapping: &HashMap<String, Expr>) -> Pattern {
+    pub fn substitute_pattern(&self, pat: Pattern, mapping: &HashMap<String, Expr>) -> Pattern {
         match pat {
             Pattern::Var(name, ty) => {
                 if let Some(Expr::Ident(replacement)) = mapping.get(&name) {
@@ -496,7 +497,7 @@ impl TemplateExpander {
         }
     }
 
-    fn substitute_stmt(&self, stmt: Stmt, mapping: &HashMap<String, Expr>) -> Stmt {
+    pub fn substitute_stmt(&self, stmt: Stmt, mapping: &HashMap<String, Expr>) -> Stmt {
         match stmt {
             Stmt::Assign(pat, expr) => Stmt::Assign(
                 self.substitute_pattern(pat, mapping),
@@ -731,7 +732,7 @@ impl TemplateExpander {
         }
     }
 
-    fn substitute_expr(&self, expr: Expr, mapping: &HashMap<String, Expr>) -> Expr {
+    pub fn substitute_expr(&self, expr: Expr, mapping: &HashMap<String, Expr>) -> Expr {
         match expr {
             Expr::Ident(ref name) => {
                 if let Some(replacement) = mapping.get(name) {
@@ -804,12 +805,13 @@ impl TemplateExpander {
                     .collect(),
                 id,
             ),
-            Expr::Comprehension(expr, pat, iterable, is_lazy, id) => Expr::Comprehension(
+            Expr::Comprehension(expr, pat, iterable, is_lazy, id, filter) => Expr::Comprehension(
                 Box::new(self.substitute_expr(*expr, mapping)),
                 Box::new(self.substitute_pattern(*pat, mapping)),
                 Box::new(self.substitute_expr(*iterable, mapping)),
                 is_lazy,
                 id,
+                filter.map(|f| Box::new(self.substitute_expr(*f, mapping))),
             ),
             Expr::MacroCall(name, args) => Expr::MacroCall(
                 name,
@@ -1476,7 +1478,7 @@ impl Analyzer {
                 }
             }
             Expr::Placeholder => {}
-            Expr::Comprehension(expr, pat, iterable, _, id) => {
+            Expr::Comprehension(expr, pat, iterable, _, id, filter) => {
                 self.visit_expr(iterable);
                 let mut info = ScopeInfo::default();
                 let mut vars = HashSet::new();
@@ -1485,6 +1487,9 @@ impl Analyzer {
                 info.defined.extend(vars);
                 info.types.extend(tys);
                 self.stack.push(info);
+                if let Some(f) = filter {
+                    self.visit_expr(f);
+                }
                 self.visit_expr(expr);
                 self.process_subscope(*id);
             }
@@ -3371,12 +3376,16 @@ fn expr_to_craw_source(expr: &Expr) -> String {
                     .unwrap_or_default()
             )
         }
-        Expr::Comprehension(expr, pat, iterable, is_lazy, _) => {
+        Expr::Comprehension(expr, pat, iterable, is_lazy, _, filter) => {
             format!(
-                "[{} for {} in {}{}]",
+                "[{} for {} in {}{}{}]",
                 expr_to_craw_source(expr),
                 pattern_to_craw_source(pat),
                 expr_to_craw_source(iterable),
+                filter
+                    .as_ref()
+                    .map(|f| format!(" if {}", expr_to_craw_source(f)))
+                    .unwrap_or_default(),
                 if *is_lazy { " lazy" } else { "" }
             )
         }
@@ -4317,7 +4326,7 @@ fn transpile_expr(
                 native_funcs,
             );
         }
-        Expr::Comprehension(expr, pat, iterable, is_lazy, id) => {
+        Expr::Comprehension(expr, pat, iterable, is_lazy, id, filter) => {
             let info = scopes.get(id).expect("Comprehension scope info not found");
             let mut captures: Vec<_> = info.captured.iter().collect();
             captures.sort();
@@ -4391,6 +4400,52 @@ fn transpile_expr(
 
                 writer.push("CallResult::Return(CrawValue::Generator(std::sync::Arc::new(std::sync::Mutex::new(v_rx)), std::sync::Arc::new(std::sync::Mutex::new(c_tx))))\n");
                 writer.push("}");
+            } else if filter.is_some() {
+                writer.push("{ let __iter = ");
+                transpile_expr_as_value(iterable, writer, current_scope, scopes, native_funcs);
+                writer.push("; ");
+
+                if !captures.is_empty() {
+                    writer.push("{ ");
+                    for cap in &captures {
+                        let esc_cap = escape_ident(cap);
+                        writer.push("let ");
+                        writer.push(&esc_cap);
+                        writer.push(" = ");
+                        writer.push(&esc_cap);
+                        writer.push(".clone(); ");
+                    }
+                }
+
+                writer.push("let __comp_items = match craw_unwrap(__iter.clone()) { ");
+                writer.push("CrawValue::List(lst) => lst.borrow().clone(), ");
+                writer.push("CrawValue::LazyList(f) => f(), ");
+                writer.push("CrawValue::String(s) => s.chars().map(|c| CrawValue::String(Rc::new(c.to_string()))).collect(), ");
+                writer.push("_ => panic!(\"TypeError: expected iterable in comprehension\") ");
+                writer.push("}; ");
+                writer.push("let mut __comp_res: Vec<CrawValue> = Vec::new(); ");
+                writer.push("for __item in __comp_items.iter() { ");
+
+                let (cond, binds) =
+                    build_pattern(pat, "__item", "comp", 0, info, scopes, native_funcs);
+                writer.push("if ");
+                writer.push(&cond);
+                writer.push(" { ");
+                writer.push(&binds);
+
+                let filter_expr = filter.as_ref().unwrap();
+                writer.push("if craw_is_truthy(&(");
+                transpile_expr_as_value(filter_expr, writer, info, scopes, native_funcs);
+                writer.push(")) { __comp_res.push(");
+                transpile_expr_as_value(expr, writer, info, scopes, native_funcs);
+                writer.push("); } } } ");
+
+                writer.push("CallResult::Return(CrawValue::List(Rc::new(RefCell::new(__comp_res))))");
+
+                if !captures.is_empty() {
+                    writer.push(" }");
+                }
+                writer.push(" }");
             } else {
                 writer.push("{ let __iter = ");
                 transpile_expr_as_value(iterable, writer, current_scope, scopes, native_funcs);

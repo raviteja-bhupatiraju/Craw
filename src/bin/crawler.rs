@@ -1,9 +1,11 @@
 use chumsky::Parser;
+use craw::ast::{Expr, Stmt};
 use craw::interpreter::{ControlFlow, Scope, eval_expr, exec_stmt};
 use craw::lexer::Lexer;
 use craw::parser;
 use craw::runtime::CrawValue;
 use craw::transpiler;
+use craw::transpiler::TemplateExpander;
 use rustyline::Editor;
 use rustyline::error::ReadlineError;
 use rustyline::highlight::{CmdKind, Highlighter};
@@ -16,6 +18,110 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::rc::Rc;
+
+/// Expands `macro name(args): body` definitions and `@name(args)` call sites
+/// into plain statements/expressions the tree-walking interpreter can run.
+/// The transpiler instead lowers these straight to a Rust `macro_rules!` and
+/// lets `rustc` expand it, which has no equivalent inside the interpreter.
+struct MacroExpander {
+    macros: HashMap<String, (Vec<String>, Vec<Stmt>)>,
+    subst: TemplateExpander,
+}
+
+impl MacroExpander {
+    fn new() -> Self {
+        Self {
+            macros: HashMap::new(),
+            subst: TemplateExpander::new(),
+        }
+    }
+
+    fn expand(&mut self, stmts: Vec<Stmt>) -> Vec<Stmt> {
+        for s in &stmts {
+            if let Stmt::MacroDef { name, args, body } = s {
+                self.macros
+                    .insert(name.clone(), (args.clone(), body.clone()));
+            }
+        }
+        self.expand_block(stmts)
+    }
+
+    fn expand_block(&mut self, stmts: Vec<Stmt>) -> Vec<Stmt> {
+        stmts
+            .into_iter()
+            .filter_map(|s| self.expand_stmt(s))
+            .collect()
+    }
+
+    fn expand_stmt(&mut self, stmt: Stmt) -> Option<Stmt> {
+        match stmt {
+            Stmt::MacroDef { .. } => None,
+            Stmt::Expr(e) => Some(Stmt::Expr(self.expand_expr(e))),
+            Stmt::Assign(pat, e) => Some(Stmt::Assign(pat, self.expand_expr(e))),
+            Stmt::Return(e) => Some(Stmt::Return(self.expand_expr(e))),
+            Stmt::If(cond, body) => {
+                Some(Stmt::If(self.expand_expr(cond), self.expand_block(body)))
+            }
+            Stmt::While(cond, body) => {
+                Some(Stmt::While(self.expand_expr(cond), self.expand_block(body)))
+            }
+            Stmt::FunctionDef {
+                name,
+                args,
+                vararg,
+                return_type,
+                body,
+                is_copyclosure,
+                is_addpattern,
+                is_generator,
+                id,
+            } => Some(Stmt::FunctionDef {
+                name,
+                args,
+                vararg,
+                return_type,
+                body: self.expand_block(body),
+                is_copyclosure,
+                is_addpattern,
+                is_generator,
+                id,
+            }),
+            Stmt::Match(e, cases) => Some(Stmt::Match(
+                self.expand_expr(e),
+                cases
+                    .into_iter()
+                    .map(|(p, g, b)| (p, g.map(|g| self.expand_expr(g)), self.expand_block(b)))
+                    .collect(),
+            )),
+            Stmt::MatchFor(p, e, b) => {
+                Some(Stmt::MatchFor(p, self.expand_expr(e), self.expand_block(b)))
+            }
+            other => Some(other),
+        }
+    }
+
+    fn expand_expr(&mut self, expr: Expr) -> Expr {
+        match expr {
+            Expr::MacroCall(name, args) => {
+                let args: Vec<Expr> = args.into_iter().map(|a| self.expand_expr(a)).collect();
+                if let Some((params, body)) = self.macros.get(&name).cloned() {
+                    let mut mapping = HashMap::new();
+                    for (p, a) in params.iter().zip(args.iter()) {
+                        mapping.insert(p.clone(), a.clone());
+                    }
+                    let substituted: Vec<Stmt> = body
+                        .into_iter()
+                        .map(|s| self.subst.substitute_stmt(s, &mapping))
+                        .collect();
+                    Expr::Where(Box::new(Expr::None), substituted, 0)
+                } else {
+                    Expr::MacroCall(name, args)
+                }
+            }
+            other => other,
+        }
+    }
+}
 
 #[derive(Helper)]
 struct CrawlerHelper {
@@ -308,6 +414,8 @@ fn main() -> rustyline::Result<()> {
             }
             std::process::exit(1);
         } else if let Some(stmts) = ast {
+            let stmts = craw::transpiler::TemplateExpander::new().expand(stmts);
+            let stmts = MacroExpander::new().expand(stmts);
             for stmt in stmts {
                 if let Err(e) = exec_stmt(&stmt, &mut scope) {
                     eprintln!("\x1b[31mError: {}\x1b[0m", e);

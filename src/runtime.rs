@@ -1138,6 +1138,14 @@ pub fn craw_mul2(a: CrawValue, b: CrawValue) -> CrawValue {
         (CrawValue::Int(n), CrawValue::String(s)) => {
             CrawValue::String(Rc::new(s.repeat(n.max(0) as usize)))
         }
+        (CrawValue::List(l), CrawValue::Int(n)) | (CrawValue::Int(n), CrawValue::List(l)) => {
+            let item = l.borrow();
+            let mut out = Vec::with_capacity(item.len() * n.max(0) as usize);
+            for _ in 0..n.max(0) {
+                out.extend(item.iter().cloned());
+            }
+            CrawValue::List(Rc::new(RefCell::new(out)))
+        }
         _ => panic!("TypeError"),
     }
 }
@@ -1731,6 +1739,51 @@ fn get_string_method(_obj: &CrawValue, s: &Rc<String>, attr: &str) -> Option<Cra
         "strip" => Some(CrawValue::Closure(Rc::new(move |_| {
             CallResult::Return(CrawValue::String(Rc::new(s.trim().to_string())))
         }))),
+        "split" => Some(CrawValue::Closure(Rc::new(move |args| {
+            let sep = match args.first() {
+                Some(CrawValue::String(sep)) => sep.to_string(),
+                _ => panic!("TypeError: split expects a string separator"),
+            };
+            let parts: Vec<CrawValue> = s
+                .split(sep.as_str())
+                .map(|p| CrawValue::String(Rc::new(p.to_string())))
+                .collect();
+            CallResult::Return(CrawValue::List(Rc::new(RefCell::new(parts))))
+        }))),
+        "join" => Some(CrawValue::Closure(Rc::new(move |args| {
+            let items = match &args[0] {
+                CrawValue::List(items) => items.borrow().clone(),
+                CrawValue::Tuple(items) => items.as_ref().clone(),
+                _ => panic!("TypeError: join expects a list or tuple"),
+            };
+            let parts: Vec<String> = items.iter().map(|v| v.to_string()).collect();
+            CallResult::Return(CrawValue::String(Rc::new(parts.join(&s))))
+        }))),
+        "replace" => Some(CrawValue::Closure(Rc::new(move |args| {
+            let from = match &args[0] {
+                CrawValue::String(from) => from.to_string(),
+                _ => panic!("TypeError: replace expects string arguments"),
+            };
+            let to = match &args[1] {
+                CrawValue::String(to) => to.to_string(),
+                _ => panic!("TypeError: replace expects string arguments"),
+            };
+            CallResult::Return(CrawValue::String(Rc::new(s.replace(&from, &to))))
+        }))),
+        "startswith" => Some(CrawValue::Closure(Rc::new(move |args| {
+            let prefix = match &args[0] {
+                CrawValue::String(p) => p.to_string(),
+                _ => panic!("TypeError: startswith expects a string"),
+            };
+            CallResult::Return(CrawValue::Bool(s.starts_with(&prefix)))
+        }))),
+        "endswith" => Some(CrawValue::Closure(Rc::new(move |args| {
+            let suffix = match &args[0] {
+                CrawValue::String(p) => p.to_string(),
+                _ => panic!("TypeError: endswith expects a string"),
+            };
+            CallResult::Return(CrawValue::Bool(s.ends_with(&suffix)))
+        }))),
         _ => None,
     }
 }
@@ -1794,6 +1847,16 @@ fn get_list_method(
         }))),
         "len" => Some(CrawValue::Closure(Rc::new(move |_| {
             CallResult::Return(CrawValue::Int(l.borrow().len() as i64))
+        }))),
+        "remove" => Some(CrawValue::Closure(Rc::new(move |args| {
+            let mut items = l.borrow_mut();
+            match items.iter().position(|v| *v == args[0]) {
+                Some(idx) => {
+                    items.remove(idx);
+                }
+                None => panic!("ValueError: value not in list"),
+            }
+            CallResult::Return(CrawValue::None)
         }))),
         _ => None,
     }
