@@ -4,7 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-chumsky = { version = "0.13.0" }
+# `stacker` (chumsky's default deep-recursion feature) pulls in `psm`,
+# which builds hand-written stack-switching assembly - unnecessary
+# native-code surface we don't need. Disabling it trades graceful
+# handling of pathologically deep recursion for a simpler build.
+chumsky = { version = "0.13.0", default-features = false, features = ["std"] }
 tower-lsp = "0.20.0"
 tokio = { version = "1.53.1", features = ["full"] }
 serde_json = "1.0.151"
@@ -22,12 +26,14 @@ path = "src/lib.rs"
 
 [profile.release]
 opt-level = 3
-# Fat LTO (`lto = true`) merges the whole dependency graph - including
+# LTO (fat or thin) merges the whole dependency graph - including
 # chumsky's deeply-generic recursive parser combinator types - into one
-# LLVM module. That pass needs more stack than the Windows MSVC linker
-# thread gets by default and crashes rustc with STATUS_ACCESS_VIOLATION.
-# Thin LTO keeps nearly all the runtime benefit without that failure mode.
-lto = "thin"
+# LLVM module for cross-crate optimization. Codegen for that merged
+# module overflows rustc's own compilation-thread stack (confirmed via
+# a reproducible SIGSEGV inside LLVM's SelectionDAG instruction
+# selection, not specific to any one platform or toolchain), so it's
+# off entirely rather than merely switched between LTO modes.
+lto = false
 codegen-units = 1
 panic = "abort"
 strip = true
