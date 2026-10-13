@@ -1,0 +1,8 @@
+def main():
+    nums = [x for x in range(10)]
+    print(nums)
+    # Testing if comprehension has filtering
+    evens = [x for x in range(10) if x % 2 == 0]
+    print(evens)
+
+main()

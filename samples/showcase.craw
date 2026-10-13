@@ -1,0 +1,164 @@
+# A comprehensive showcase of Craw language features.
+
+# 1. Rust Interop & External Imports
+use std::thread;
+
+# 2. Algebraic Data Types (ADTs) & Domain Modeling
+data Coordinate(x, y, z)
+data SensorReading(timestamp, value)
+
+# Commands using ADTs
+data Thrust(engine_id, power)
+data Rotate(pitch, yaw, roll)
+data DeploySolarPanels()
+data SystemCheck(status)
+
+# 3. Custom Operators & Unicode Math
+def `≈`(a, b) = (a - b).abs() < 0.0001
+def `⊕`(a, b) = a + b
+def `√`(x) = sqrt(x)
+def `∘`(f, g) = x => f(g(x))
+
+# 4. Helper Functions & Keyword Elision
+def pad_string(s, length):
+    diff = length - len(s)
+    pad = if diff > 0 then " " * diff else ""
+    return s + pad
+
+def log_event(level, message, timestamp="T-0"):
+    pad_level = pad_string(level, 10)
+    print(pad_level + "| " + message + " (" + str(timestamp) + ")")
+
+# 5. Templates for Control Flow & Macros for Assertions
+template measure_time(label, code_expr):
+    start = rust:
+        let now = std::time::SystemTime::now();
+        now.duration_since(std::time::UNIX_EPOCH).unwrap().as_micros() as f64 / 1000.0
+    result = code_expr
+    end = rust:
+        let now = std::time::SystemTime::now();
+        now.duration_since(std::time::UNIX_EPOCH).unwrap().as_micros() as f64 / 1000.0
+    print("[System] " + label + " took " + str(end - start) + " ms")
+    result
+
+template repeat_task(n, times, body, on, complete, handler, handler_block):
+    count = 0
+    while count < n:
+        res = body
+        if res:
+            break
+        count += 1
+        handler_block
+
+macro assert_safe(cond, msg):
+    if not cond:
+        print("CRITICAL FAILURE:", msg)
+        rust: panic!("Assertion failed in simulation");
+
+# 6. Generators for Data Streams
+gen sensor_stream():
+    t = 0
+    while True:
+        yield {"timestamp": t, "value": 100.0 + (t * 2.5)}
+        t += 1
+
+# 7. Pipelines & Data Processing Functions
+def normalize(val) = val / 100.0
+def add_noise(val) = val + 0.5
+def process_reading(reading) = reading |> normalize |> add_noise
+
+def main():
+    print("=== Aurora Space Mission Control ===")
+
+    # Basic Syntax, Destructuring & Sets
+    [mission_name, *tags] = ["Aurora-1", "Mars", "Exploration", "Crewed"]
+    active_zones = {"Alpha", "Beta", "Gamma"}
+    print("Initializing Mission:", mission_name, "| Tags:", tags)
+    print("Is Alpha zone active?", "Alpha" ∈ active_zones)
+
+    print("\n--- Sensor Data Processing ---")
+    # Generators & Comprehensions
+    stream = sensor_stream()
+    readings = [next(stream) for _ in range(4)]
+    
+    # Gathering & Broadcasting
+    raw_values = readings..value
+    adjusted_values = raw_values .+ 5.0
+    print("Raw values:", raw_values)
+    print("Adjusted Broadcast:", adjusted_values)
+
+    # Function Composition & Pipelines (All Variants)
+    # Forward Pipe: |> (single), |*> (splat), |?> (optional)
+    # Backward Pipe: <|
+    def format_readings(a, b) = "R1: " + str(a) + ", R2: " + str(b)
+    
+    # Splat Pipe
+    splat_res = [raw_values[0], raw_values[1]] |*> format_readings
+    print("Splat Pipe Result:", splat_res)
+
+    # Optional Pipe (short circuits on None)
+    opt_val = None
+    safe_pipe = opt_val |?> normalize |?> add_noise
+    print("Optional Pipe (None):", safe_pipe)
+
+    # Backward Pipe
+    def format_readings_tuple((a, b)) = "R1: " + str(a) + ", R2: " + str(b)
+    print("Backward Pipe:", format_readings_tuple <| (10, 20))
+
+    # Composition: >> (forward), << (backward), ∘ (Unicode)
+    f_pipeline = normalize >> add_noise
+    b_pipeline = add_noise << normalize
+    u_pipeline = add_noise ∘ normalize
+    
+    print("Pipeline check (100.0 -> add_noise(normalize(100.0))):", f_pipeline(100.0))
+    print("Backward compose check:", b_pipeline(100.0))
+    print("Unicode compose check:", u_pipeline(100.0))
+
+    # Partial Application with Holes (_) and End-Partial ($)
+    def calibrate(sensor, val, factor) = val * factor
+    cal_sensor_1 = calibrate$("S1", _, 1.5)
+    print("Partial App (Hole):", cal_sensor_1(100.0))
+
+    print("\n--- Command Execution Sequence ---")
+    # Pattern Matching on ADTs with Guards
+    commands = [
+        Thrust(1, 95.5),
+        Rotate(10, 0, -5),
+        DeploySolarPanels(),
+        SystemCheck("All systems nominal")
+    ]
+
+    for cmd in commands:
+        match cmd:
+            case Thrust(id, power) if power > 90.0:
+                log_event("WARNING", "High power thrust on engine " + str(id))
+            case Thrust(id, power):
+                log_event("INFO", "Normal thrust on engine " + str(id))
+            case Rotate(p, y, r):
+                log_event("INFO", "Rotating spacecraft")
+            case DeploySolarPanels():
+                log_event("SUCCESS", "Solar panels deployed")
+            case SystemCheck(status):
+                log_event("INFO", "Check complete: " + status)
+
+    print("\n--- System Diagnostics ---")
+    # Templates & Macros
+    def do_sum():
+        sum = 0
+        for i in 1..1000:
+            sum += i
+        return sum
+
+    val_sum = measure_time("System Verification", do_sum())
+    @assert_safe(val_sum > 0, "Math system ready!")
+    
+    # Custom block syntax enabled by templates
+    print("Initializing sensor arrays...")
+    repeat_task 3 times:
+        False # simulate multiple passes
+    on complete handler:
+        log_event("SUCCESS", "Sensor pass complete")
+
+    print("\n=== Mission Control Shutdown ===")
+
+main()

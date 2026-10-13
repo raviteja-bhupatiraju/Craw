@@ -1,0 +1,92 @@
+{
+  "Function definition": {
+    "prefix": "def",
+    "body": ["def ${1:name}(${2:args}):", "    $0"],
+    "description": "Function definition"
+  },
+  "One-line function": {
+    "prefix": "defx",
+    "body": "def ${1:name}(${2:args}) = $0",
+    "description": "One-line function definition"
+  },
+  "Generator definition": {
+    "prefix": "gen",
+    "body": ["gen ${1:name}(${2:args}):", "    $0"],
+    "description": "Generator definition"
+  },
+  "Data class": {
+    "prefix": "data",
+    "body": "data ${1:Name}(${2:fields})",
+    "description": "Data class"
+  },
+  "Class definition": {
+    "prefix": "class",
+    "body": ["class ${1:Name}(${2:args}):", "    $0"],
+    "description": "Class definition"
+  },
+  "Pattern match": {
+    "prefix": "match",
+    "body": ["match ${1:expr}:", "    case ${2:pattern}:", "        $0"],
+    "description": "Pattern match"
+  },
+  "Match arm": {
+    "prefix": "case",
+    "body": ["case ${1:pattern}:", "    $0"],
+    "description": "Match arm"
+  },
+  "For loop": {
+    "prefix": "for",
+    "body": ["for ${1:item} in ${2:iterable}:", "    $0"],
+    "description": "For loop"
+  },
+  "While loop": {
+    "prefix": "while",
+    "body": ["while ${1:cond}:", "    $0"],
+    "description": "While loop"
+  },
+  "If statement": {
+    "prefix": "if",
+    "body": ["if ${1:cond}:", "    $0"],
+    "description": "If statement"
+  },
+  "If/else statement": {
+    "prefix": "ife",
+    "body": ["if ${1:cond}:", "    ${2}", "else:", "    $0"],
+    "description": "If/else statement"
+  },
+  "Template definition": {
+    "prefix": "template",
+    "body": ["template ${1:name}(${2:args}):", "    $0"],
+    "description": "Template definition"
+  },
+  "Macro definition": {
+    "prefix": "macro",
+    "body": ["macro ${1:name}(${2:args}):", "    $0"],
+    "description": "Macro definition"
+  },
+  "Inline Rust block": {
+    "prefix": "rust",
+    "body": ["rust:", "    $0"],
+    "description": "Inline Rust block"
+  },
+  "Lambda": {
+    "prefix": "lambda",
+    "body": "${1:x} => $0",
+    "description": "Lambda"
+  },
+  "Where clause": {
+    "prefix": "where",
+    "body": ["${1:expr} where:", "    $0"],
+    "description": "Where clause"
+  },
+  "Query expression": {
+    "prefix": "query",
+    "body": "${1:result} = from ${2:x} in ${3:xs} where ${4:cond} select $0",
+    "description": "Query expression"
+  },
+  "Main function": {
+    "prefix": "main",
+    "body": ["def main():", "    $0"],
+    "description": "Entry-point function"
+  }
+}

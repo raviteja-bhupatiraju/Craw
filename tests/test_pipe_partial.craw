@@ -1,0 +1,8 @@
+def main():
+    l = [True, False, True]
+    # Testing pipe with partial
+    res = l |> filter$(x => x, ?)
+    print("res:", res)
+    print("len:", res.len())
+
+main()

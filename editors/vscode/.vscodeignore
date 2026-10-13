@@ -1,0 +1,12 @@
+.vscode-test/**
+src/**
+node_modules/**
+**/*.map
+**/*.ts
+tsconfig.json
+vitest.config.ts
+package-lock.json
+.eslintrc*
+eslint.config.js
+.gitignore
+syntaxes/tests/**

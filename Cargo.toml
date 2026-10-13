@@ -1,0 +1,41 @@
+[package]
+name = "craw"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# `stacker` (chumsky's default deep-recursion feature) pulls in `psm`,
+# which builds hand-written stack-switching assembly - unnecessary
+# native-code surface we don't need. Disabling it trades graceful
+# handling of pathologically deep recursion for a simpler build.
+chumsky = { version = "0.13.0", default-features = false, features = ["std"] }
+tower-lsp = "0.20.0"
+tokio = { version = "1.53.1", features = ["full"] }
+serde_json = "1.0.151"
+syn = { version = "3.0.4", features = ["full"] }
+quote = "1.0.47"
+proc-macro2 = "1.0.107"
+rustyline = "18.0.1"
+parking_lot = "0.12.5"
+home = "0.5.12"
+rustyline-derive = "0.12.0"
+
+[dev-dependencies]
+tempfile = "3.14.0"
+
+[lib]
+name = "craw"
+path = "src/lib.rs"
+
+[profile.release]
+opt-level = 3
+# Both LTO and codegen-units = 1 force chumsky's deeply-generic
+# recursive parser combinator types to be optimized as one giant LLVM
+# module instead of several smaller, parallel ones. That single module
+# is large enough to crash rustc's own LLVM backend outright (confirmed
+# by reproducing two different SIGSEGVs locally, in two different LLVM
+# passes, independent of platform or toolchain) - so both are left off
+# rather than merely tuned, trading a slower/larger release binary for
+# the build reliably completing at all.
+panic = "abort"
+strip = true

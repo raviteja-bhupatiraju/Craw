@@ -1,0 +1,32 @@
+# Demonstrates the `template` macro-block DSL: custom, keyword-free block
+# statements built entirely in user code. See Spec.md, "Templates".
+
+template repeat(count, body):
+    i = 0
+    while i < count:
+        body
+        i = i + 1
+
+# `when`/`otherwise` fills a real gap in the language: the built-in `if` has
+# no `else`, so this is how you'd build one out of `template` + branches.
+template when(cond, then_body, branch_kw, else_body):
+    matched = cond
+    if matched:
+        then_body
+    if not matched:
+        else_body
+
+repeat 3:
+    print("hello from repeat")
+
+x = 5
+when x > 0:
+    print("x is positive")
+otherwise:
+    print("x is non-positive")
+
+y = -3
+when y > 0:
+    print("y is positive")
+otherwise:
+    print("y is non-positive")

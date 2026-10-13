@@ -1,0 +1,420 @@
+{
+  "name": "craw",
+  "displayName": "Craw Language Support",
+  "description": "Language support for Craw: diagnostics, completion, inlay hints, semantic highlighting, code actions, formatting, call hierarchy, and more.",
+  "publisher": "local",
+  "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/raviteja-bhupatiraju/Craw.git"
+  },
+  "bugs": {
+    "url": "https://github.com/raviteja-bhupatiraju/Craw/issues"
+  },
+  "homepage": "https://github.com/raviteja-bhupatiraju/Craw",
+  "license": "MIT",
+  "icon": "icons/craw.png",
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Formatters",
+    "Snippets"
+  ],
+  "keywords": [
+    "craw",
+    "language server",
+    "lsp"
+  ],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "activationEvents": [
+    "onLanguage:craw",
+    "workspaceContains:**/*.craw"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "craw",
+        "extensions": [
+          ".craw"
+        ],
+        "aliases": [
+          "Craw"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/craw.svg",
+          "dark": "./icons/craw.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "craw",
+        "scopeName": "source.craw",
+        "path": "./syntaxes/craw.tmLanguage.json",
+        "embeddedLanguages": {
+          "meta.embedded.block.rust": "rust"
+        }
+      }
+    ],
+    "snippets": [
+      {
+        "language": "craw",
+        "path": "./snippets/craw.json"
+      }
+    ],
+    "configurationDefaults": {
+      "[craw]": {
+        "editor.semanticHighlighting.enabled": true,
+        "editor.wordBasedSuggestions": "off",
+        "editor.defaultFormatter": "local.craw",
+        "editor.inlayHints.enabled": "on"
+      }
+    },
+    "configuration": {
+      "title": "Craw",
+      "properties": {
+        "craw.server.path": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Path to the `craw-lsp` binary. Supports `${workspaceFolder}`, `${userHome}`, `${env:NAME}` and `~`; a relative path is resolved against the workspace folder. When empty, the extension looks for `$CRAW_LSP_PATH`, then (with `#craw.server.useWorkspaceBuild#`) the workspace build, then the binary bundled with the extension, then `craw-lsp` on `PATH`."
+        },
+        "craw.server.extraEnv": {
+          "type": "object",
+          "default": {},
+          "description": "Extra environment variables to pass to the craw-lsp process."
+        },
+        "craw.server.useWorkspaceBuild": {
+          "type": "boolean",
+          "default": false,
+          "description": "Development flag: prefer craw-lsp from <workspace>/target/release or target/debug over the bundled binary."
+        },
+        "craw.cli.path": {
+          "type": "string",
+          "default": "craw",
+          "description": "Path to the craw CLI binary, used by the run/build/transpile commands. Supports the same variables as craw.server.path."
+        },
+        "craw.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace the communication between VS Code and the Craw language server."
+        },
+        "craw.diagnostics.unresolved": {
+          "type": "boolean",
+          "default": true,
+          "description": "Report names that don't resolve to a definition, builtin, or field."
+        },
+        "craw.diagnostics.unused": {
+          "type": "boolean",
+          "default": true,
+          "description": "Report unused local variables and parameters."
+        },
+        "craw.interpreter.path": {
+          "type": "string",
+          "default": "crawler",
+          "description": "Path to the crawler interpreter, used by the REPL and \"Run File in Interpreter\"."
+        },
+        "craw.run.saveBeforeRun": {
+          "type": "boolean",
+          "default": true,
+          "description": "Save the file before running, building or transpiling it (the CLI reads the file on disk, not the editor buffer)."
+        },
+        "craw.lens.run.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Run / Build / Show Rust code lenses at the top of Craw files."
+        },
+        "craw.inlayHints.parameterNames.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show parameter names at call sites of user functions and data constructors."
+        },
+        "craw.inlayHints.typeHints.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inferred types after variables whose initializer does not make the type obvious."
+        },
+        "craw.inlayHints.returnTypeHints.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the inferred return type of functions without a `-> Type` annotation."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "craw.restartServer",
+        "title": "Craw: Restart Language Server"
+      },
+      {
+        "command": "craw.stopServer",
+        "title": "Craw: Stop Language Server"
+      },
+      {
+        "command": "craw.startServer",
+        "title": "Craw: Start Language Server"
+      },
+      {
+        "command": "craw.showServerOutput",
+        "title": "Craw: Show Language Server Output"
+      },
+      {
+        "command": "craw.showServerMenu",
+        "title": "Craw: Server Menu"
+      },
+      {
+        "command": "craw.run",
+        "title": "Craw: Run File",
+        "icon": "$(play)"
+      },
+      {
+        "command": "craw.runRelease",
+        "title": "Craw: Run File (Release)"
+      },
+      {
+        "command": "craw.build",
+        "title": "Craw: Build File"
+      },
+      {
+        "command": "craw.transpile",
+        "title": "Craw: Transpile File"
+      },
+      {
+        "command": "craw.runInterpreter",
+        "title": "Craw: Run File in Interpreter"
+      },
+      {
+        "command": "craw.openRepl",
+        "title": "Craw: Open REPL"
+      },
+      {
+        "command": "craw.newProject",
+        "title": "Craw: New Project"
+      },
+      {
+        "command": "craw.showSyntaxTree",
+        "title": "Craw: Show Syntax Tree"
+      },
+      {
+        "command": "craw.showTranspiledRust",
+        "title": "Craw: Show Generated Rust",
+        "icon": "$(file-code)"
+      }
+    ],
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "craw.run",
+          "when": "editorLangId == craw",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "craw.run",
+          "when": "editorLangId == craw",
+          "group": "craw"
+        },
+        {
+          "command": "craw.build",
+          "when": "editorLangId == craw",
+          "group": "craw"
+        },
+        {
+          "command": "craw.transpile",
+          "when": "editorLangId == craw",
+          "group": "craw"
+        },
+        {
+          "command": "craw.showTranspiledRust",
+          "when": "editorLangId == craw",
+          "group": "craw"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "craw.run",
+          "when": "resourceLangId == craw",
+          "group": "craw"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "craw.run",
+          "when": "editorLangId == craw"
+        },
+        {
+          "command": "craw.runRelease",
+          "when": "editorLangId == craw"
+        },
+        {
+          "command": "craw.build",
+          "when": "editorLangId == craw"
+        },
+        {
+          "command": "craw.transpile",
+          "when": "editorLangId == craw"
+        },
+        {
+          "command": "craw.runInterpreter",
+          "when": "editorLangId == craw"
+        },
+        {
+          "command": "craw.showSyntaxTree",
+          "when": "editorLangId == craw"
+        },
+        {
+          "command": "craw.showTranspiledRust",
+          "when": "editorLangId == craw"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "craw.showTranspiledRust",
+          "when": "editorLangId == craw",
+          "group": "navigation@2"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "craw.run",
+        "key": "ctrl+alt+r",
+        "mac": "ctrl+alt+r",
+        "when": "editorTextFocus && editorLangId == craw"
+      }
+    ],
+    "taskDefinitions": [
+      {
+        "type": "craw",
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "build",
+              "run",
+              "transpile"
+            ],
+            "description": "The craw subcommand to run."
+          },
+          "file": {
+            "type": "string",
+            "description": "The .craw file to operate on (defaults to the active editor's file)."
+          },
+          "release": {
+            "type": "boolean",
+            "description": "Pass --release to `craw run`."
+          }
+        }
+      }
+    ],
+    "problemMatchers": [
+      {
+        "name": "craw",
+        "owner": "craw",
+        "fileLocation": [
+          "relative",
+          "${workspaceFolder}"
+        ],
+        "pattern": {
+          "regexp": "^(.+?):(\\d+):(\\d+): (error|warning): (.+)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "message": 5
+        }
+      },
+      {
+        "name": "craw-rustc",
+        "owner": "craw",
+        "fileLocation": [
+          "relative",
+          "${workspaceFolder}"
+        ],
+        "pattern": [
+          {
+            "regexp": "^(warning|error)(\\[E\\d+\\])?: (.*)$",
+            "severity": 1,
+            "message": 3
+          },
+          {
+            "regexp": "^\\s*-->\\s(.*):(\\d+):(\\d+)$",
+            "file": 1,
+            "line": 2,
+            "column": 3
+          }
+        ]
+      }
+    ],
+    "semanticTokenTypes": [
+      {
+        "id": "unresolvedReference",
+        "superType": "variable",
+        "description": "A name that does not resolve to any definition."
+      }
+    ],
+    "semanticTokenModifiers": [
+      {
+        "id": "global",
+        "description": "A module-level variable."
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "craw",
+        "scopes": {
+          "unresolvedReference": [
+            "invalid.unresolved.craw"
+          ],
+          "variable.global": [
+            "variable.other.global.craw"
+          ],
+          "function.defaultLibrary": [
+            "support.function.builtin.craw"
+          ],
+          "type.defaultLibrary": [
+            "support.type.craw"
+          ]
+        }
+      }
+    ]
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.23.0",
+    "eslint": "^9.0.0",
+    "js-yaml": "^4.3.2",
+    "typescript": "^5.0.0",
+    "vitest": "^2.0.0",
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-textmate": "^9.3.2"
+  },
+  "scripts": {
+    "compile": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --sourcemap",
+    "watch": "npm run compile -- --watch",
+    "typecheck": "tsc -p ./ --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run",
+    "package": "vsce package"
+  }
+}

@@ -1,0 +1,1206 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "Craw",
+    "scopeName": "source.craw",
+    "fileTypes": [
+        "craw"
+    ],
+    "patterns": [
+        {
+            "include": "#rust-line-passthrough"
+        },
+        {
+            "include": "#rust-fn-item"
+        },
+        {
+            "include": "#rust-block"
+        },
+        {
+            "include": "#expression"
+        }
+    ],
+    "repository": {
+        "comments": {
+            "begin": "#",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.definition.comment.craw"
+                }
+            },
+            "end": "$",
+            "name": "comment.line.number-sign.craw",
+            "patterns": [
+                {
+                    "include": "#codetags"
+                }
+            ]
+        },
+        "codetags": {
+            "match": "(?<![\\p{Alphabetic}\\p{N}_])(TODO|FIXME|XXX)(?![\\p{Alphabetic}\\p{N}_])",
+            "captures": {
+                "1": {
+                    "name": "keyword.codetag.craw"
+                }
+            }
+        },
+        "expression": {
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "include": "#strings"
+                },
+                {
+                    "include": "#rust-escape"
+                },
+                {
+                    "include": "#operator-section"
+                },
+                {
+                    "include": "#numbers"
+                },
+                {
+                    "include": "#function-definition"
+                },
+                {
+                    "include": "#type-definition"
+                },
+                {
+                    "include": "#decorator"
+                },
+                {
+                    "include": "#keywords"
+                },
+                {
+                    "include": "#constants"
+                },
+                {
+                    "include": "#return-annotation"
+                },
+                {
+                    "include": "#builtin-types"
+                },
+                {
+                    "include": "#builtin-functions"
+                },
+                {
+                    "include": "#member-access"
+                },
+                {
+                    "include": "#function-call"
+                },
+                {
+                    "include": "#identifiers"
+                },
+                {
+                    "include": "#operators"
+                },
+                {
+                    "include": "#punctuation"
+                }
+            ]
+        },
+        "fstring-expression": {
+            "patterns": [
+                {
+                    "name": "string.quoted.single.craw",
+                    "match": "'(?:[^'\"\\\\]|\\\\[^\"])*'"
+                },
+                {
+                    "include": "#operator-section"
+                },
+                {
+                    "include": "#numbers"
+                },
+                {
+                    "include": "#keywords"
+                },
+                {
+                    "include": "#constants"
+                },
+                {
+                    "include": "#builtin-types"
+                },
+                {
+                    "include": "#builtin-functions"
+                },
+                {
+                    "include": "#member-access"
+                },
+                {
+                    "include": "#function-call"
+                },
+                {
+                    "include": "#identifiers"
+                },
+                {
+                    "include": "#operators"
+                },
+                {
+                    "include": "#punctuation"
+                }
+            ]
+        },
+        "strings": {
+            "patterns": [
+                {
+                    "include": "#fstring"
+                },
+                {
+                    "include": "#string-triple-double"
+                },
+                {
+                    "include": "#string-triple-single"
+                },
+                {
+                    "include": "#string-double"
+                },
+                {
+                    "include": "#string-single"
+                },
+                {
+                    "include": "#string-backtick"
+                }
+            ]
+        },
+        "string-escape": {
+            "name": "constant.character.escape.craw",
+            "match": "\\\\(?:.|$)"
+        },
+        "string-double": {
+            "name": "string.quoted.double.craw",
+            "begin": "\"",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.definition.string.begin.craw"
+                }
+            },
+            "end": "\"",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.definition.string.end.craw"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#string-escape"
+                }
+            ]
+        },
+        "string-single": {
+            "name": "string.quoted.single.craw",
+            "begin": "'",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.definition.string.begin.craw"
+                }
+            },
+            "end": "'",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.definition.string.end.craw"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#string-escape"
+                }
+            ]
+        },
+        "string-triple-double": {
+            "name": "string.quoted.double.block.craw",
+            "begin": "\"\"\"",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.definition.string.begin.craw"
+                }
+            },
+            "end": "\"\"\"",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.definition.string.end.craw"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#string-escape"
+                }
+            ]
+        },
+        "string-triple-single": {
+            "name": "string.quoted.single.block.craw",
+            "begin": "'''",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.definition.string.begin.craw"
+                }
+            },
+            "end": "'''",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.definition.string.end.craw"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#string-escape"
+                }
+            ]
+        },
+        "string-backtick": {
+            "name": "string.interpolated.backtick.craw",
+            "begin": "`",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.definition.string.begin.craw"
+                }
+            },
+            "end": "`",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.definition.string.end.craw"
+                }
+            }
+        },
+        "fstring": {
+            "name": "meta.fstring.craw",
+            "begin": "(f)(\")",
+            "beginCaptures": {
+                "1": {
+                    "name": "storage.type.string.craw"
+                },
+                "2": {
+                    "name": "string.interpolated.craw punctuation.definition.string.begin.craw"
+                }
+            },
+            "end": "\"",
+            "endCaptures": {
+                "0": {
+                    "name": "string.interpolated.craw punctuation.definition.string.end.craw"
+                }
+            },
+            "patterns": [
+                {
+                    "name": "string.interpolated.craw constant.character.escape.craw",
+                    "match": "\\{\\{|\\}\\}"
+                },
+                {
+                    "include": "#fstring-interpolation"
+                },
+                {
+                    "name": "string.interpolated.craw",
+                    "match": "[^{}\"]+"
+                },
+                {
+                    "name": "string.interpolated.craw",
+                    "match": "\\}"
+                }
+            ]
+        },
+        "fstring-interpolation": {
+            "name": "meta.embedded.expression.craw",
+            "begin": "\\{",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.section.interpolation.begin.craw"
+                }
+            },
+            "end": "\\}|(?=\")",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.section.interpolation.end.craw"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#fstring-braces"
+                },
+                {
+                    "include": "#fstring-expression"
+                }
+            ]
+        },
+        "fstring-braces": {
+            "begin": "\\{",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.section.braces.begin.craw"
+                }
+            },
+            "end": "\\}|(?=\")",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.section.braces.end.craw"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#fstring-braces"
+                },
+                {
+                    "include": "#fstring-expression"
+                }
+            ]
+        },
+        "numbers": {
+            "patterns": [
+                {
+                    "name": "constant.numeric.integer.hexadecimal.craw",
+                    "match": "0[xX][0-9a-fA-F_]*"
+                },
+                {
+                    "name": "constant.numeric.integer.octal.craw",
+                    "match": "0[oO][0-7_]*"
+                },
+                {
+                    "name": "constant.numeric.integer.binary.craw",
+                    "match": "0[bB][01_]*"
+                },
+                {
+                    "name": "constant.numeric.float.craw",
+                    "match": "[0-9](?:[0-9]|_(?=[0-9]))*(?:\\.[0-9](?:[0-9]|_(?=[0-9]))*(?:[eE][+-]?[0-9][0-9_]*)?|[eE][+-]?[0-9][0-9_]*)"
+                },
+                {
+                    "name": "constant.numeric.integer.craw",
+                    "match": "[0-9](?:[0-9]|_(?=[0-9]))*"
+                }
+            ]
+        },
+        "keywords": {
+            "patterns": [
+                {
+                    "name": "keyword.control.flow.craw",
+                    "match": "(?<![\\p{Alphabetic}\\p{N}_])(?:if|else|then|match|case|for|while|break|continue|return|yield|where)(?![\\p{Alphabetic}\\p{N}_])"
+                },
+                {
+                    "name": "keyword.control.import.craw",
+                    "match": "(?<![\\p{Alphabetic}\\p{N}_])(?:from|import|use|as)(?![\\p{Alphabetic}\\p{N}_])"
+                },
+                {
+                    "name": "keyword.control.query.craw",
+                    "match": "(?<![\\p{Alphabetic}\\p{N}_])(?:select|orderby|ascending|descending)(?![\\p{Alphabetic}\\p{N}_])"
+                },
+                {
+                    "name": "keyword.operator.logical.craw",
+                    "match": "(?<![\\p{Alphabetic}\\p{N}_])(?:and|or|not|notin|is|in)(?![\\p{Alphabetic}\\p{N}_])"
+                },
+                {
+                    "name": "keyword.operator.range.craw",
+                    "match": "(?<![\\p{Alphabetic}\\p{N}_])(?:to|until)(?![\\p{Alphabetic}\\p{N}_])"
+                },
+                {
+                    "name": "storage.modifier.declaration.craw",
+                    "match": "(?<![\\p{Alphabetic}\\p{N}_])(?:global|nonlocal)(?![\\p{Alphabetic}\\p{N}_])"
+                },
+                {
+                    "name": "storage.modifier.craw",
+                    "match": "(?<![\\p{Alphabetic}\\p{N}_])(?:copyclosure|addpattern)(?![\\p{Alphabetic}\\p{N}_])"
+                },
+                {
+                    "name": "storage.modifier.extends.craw",
+                    "match": "(?<![\\p{Alphabetic}\\p{N}_])(?:extends)(?![\\p{Alphabetic}\\p{N}_])"
+                },
+                {
+                    "name": "storage.modifier.with.craw",
+                    "match": "(?<![\\p{Alphabetic}\\p{N}_])(?:with)(?![\\p{Alphabetic}\\p{N}_])"
+                },
+                {
+                    "name": "storage.type.function.lambda.craw",
+                    "match": "(?<![\\p{Alphabetic}\\p{N}_])(?:lambda|λ)(?![\\p{Alphabetic}\\p{N}_])"
+                },
+                {
+                    "name": "storage.type.function.craw",
+                    "match": "(?<![\\p{Alphabetic}\\p{N}_])(?:def)(?![\\p{Alphabetic}\\p{N}_])"
+                },
+                {
+                    "name": "storage.type.function.generator.craw",
+                    "match": "(?<![\\p{Alphabetic}\\p{N}_])(?:gen)(?![\\p{Alphabetic}\\p{N}_])"
+                },
+                {
+                    "name": "storage.type.function.template.craw",
+                    "match": "(?<![\\p{Alphabetic}\\p{N}_])(?:template)(?![\\p{Alphabetic}\\p{N}_])"
+                },
+                {
+                    "name": "storage.type.function.macro.craw",
+                    "match": "(?<![\\p{Alphabetic}\\p{N}_])(?:macro)(?![\\p{Alphabetic}\\p{N}_])"
+                },
+                {
+                    "name": "storage.type.function.operator.craw",
+                    "match": "(?<![\\p{Alphabetic}\\p{N}_])(?:operator)(?![\\p{Alphabetic}\\p{N}_])"
+                },
+                {
+                    "name": "storage.type.class.data.craw",
+                    "match": "(?<![\\p{Alphabetic}\\p{N}_])(?:data)(?![\\p{Alphabetic}\\p{N}_])"
+                },
+                {
+                    "name": "storage.type.class.craw",
+                    "match": "(?<![\\p{Alphabetic}\\p{N}_])(?:class)(?![\\p{Alphabetic}\\p{N}_])"
+                },
+                {
+                    "name": "storage.type.struct.craw",
+                    "match": "(?<![\\p{Alphabetic}\\p{N}_])(?:struct)(?![\\p{Alphabetic}\\p{N}_])"
+                },
+                {
+                    "name": "storage.type.trait.craw",
+                    "match": "(?<![\\p{Alphabetic}\\p{N}_])(?:trait)(?![\\p{Alphabetic}\\p{N}_])"
+                },
+                {
+                    "name": "storage.type.impl.craw",
+                    "match": "(?<![\\p{Alphabetic}\\p{N}_])(?:impl)(?![\\p{Alphabetic}\\p{N}_])"
+                }
+            ]
+        },
+        "constants": {
+            "name": "constant.language.craw",
+            "match": "(?<![\\p{Alphabetic}\\p{N}_])(?:True|False|None)(?![\\p{Alphabetic}\\p{N}_])"
+        },
+        "builtin-types": {
+            "name": "support.type.craw",
+            "match": "(?<![\\p{Alphabetic}\\p{N}_])(?:Int|Float|String|Bool|List|Dict|Set|Tuple|Dynamic)(?![\\p{Alphabetic}\\p{N}_])"
+        },
+        "return-annotation": {
+            "match": "(->)[ \\t]*(None)(?![\\p{Alphabetic}\\p{N}_])",
+            "captures": {
+                "1": {
+                    "name": "keyword.operator.arrow.craw"
+                },
+                "2": {
+                    "name": "support.type.craw"
+                }
+            }
+        },
+        "builtin-functions": {
+            "name": "support.function.builtin.craw",
+            "match": "(?<!\\.)(?<![\\p{Alphabetic}\\p{N}_])(?:abs|Ok|Err|ident|const|range|fmap|map|filter|reduce|flatten|groupsof|windowsof|enumerate|list|count|len|str|any|all|sum|product|thread_map|cartesian_product|tee|safe_call|and_then|next|print|println|add|sub|mul|div|mod|eq|ne|lt|le|gt|ge|hcat|vcat|hvcat|sqrt|pow|approx)(?![\\p{Alphabetic}\\p{N}_])"
+        },
+        "member-access": {
+            "patterns": [
+                {
+                    "match": "(\\.)(?!(?:if|else|then|match|case|for|while|break|continue|return|yield|where|from|import|use|as|select|orderby|ascending|descending|and|or|not|notin|is|in|to|until|global|nonlocal|copyclosure|addpattern|extends|with|lambda|def|gen|data|class|struct|trait|impl|template|macro|operator)(?![\\p{Alphabetic}\\p{N}_]))([\\p{Alphabetic}_][\\p{Alphabetic}\\p{N}_]*)(?=\\()",
+                    "captures": {
+                        "1": {
+                            "name": "punctuation.accessor.craw"
+                        },
+                        "2": {
+                            "name": "entity.name.function.member.craw"
+                        }
+                    }
+                },
+                {
+                    "match": "(\\.)(?!(?:if|else|then|match|case|for|while|break|continue|return|yield|where|from|import|use|as|select|orderby|ascending|descending|and|or|not|notin|is|in|to|until|global|nonlocal|copyclosure|addpattern|extends|with|lambda|def|gen|data|class|struct|trait|impl|template|macro|operator)(?![\\p{Alphabetic}\\p{N}_]))([\\p{Alphabetic}_][\\p{Alphabetic}\\p{N}_]*)",
+                    "captures": {
+                        "1": {
+                            "name": "punctuation.accessor.craw"
+                        },
+                        "2": {
+                            "name": "variable.other.member.craw"
+                        }
+                    }
+                }
+            ]
+        },
+        "function-call": {
+            "match": "([\\p{Alphabetic}_][\\p{Alphabetic}\\p{N}_]*)(?=\\()",
+            "captures": {
+                "1": {
+                    "name": "entity.name.function.call.craw"
+                }
+            }
+        },
+        "identifiers": {
+            "name": "variable.other.craw",
+            "match": "[\\p{Alphabetic}_][\\p{Alphabetic}\\p{N}_]*"
+        },
+        "function-definition": {
+            "patterns": [
+                {
+                    "name": "meta.function.craw",
+                    "begin": "(?<![\\p{Alphabetic}\\p{N}_])(def|gen|template|macro)(?![\\p{Alphabetic}\\p{N}_])[ \\t]*(?:(`)([^`]*)(`)|([\\p{Alphabetic}_][\\p{Alphabetic}\\p{N}_]*)|(\\()([^\\p{Alphabetic}\\p{N}_() \\n|,?\"'\\[{][^\\p{Alphabetic}\\p{N} ,?)\\n]*)(\\)))[ \\t]*(\\()",
+                    "beginCaptures": {
+                        "1": {
+                            "patterns": [
+                                {
+                                    "include": "#keywords"
+                                }
+                            ]
+                        },
+                        "2": {
+                            "name": "entity.name.function.craw punctuation.definition.function.begin.craw"
+                        },
+                        "3": {
+                            "name": "entity.name.function.craw"
+                        },
+                        "4": {
+                            "name": "entity.name.function.craw punctuation.definition.function.end.craw"
+                        },
+                        "5": {
+                            "name": "entity.name.function.craw"
+                        },
+                        "6": {
+                            "name": "punctuation.parenthesis.begin.craw"
+                        },
+                        "7": {
+                            "name": "entity.name.function.operator.craw"
+                        },
+                        "8": {
+                            "name": "punctuation.parenthesis.end.craw"
+                        },
+                        "9": {
+                            "name": "meta.function.parameters.craw punctuation.definition.parameters.begin.craw"
+                        }
+                    },
+                    "end": "\\)",
+                    "endCaptures": {
+                        "0": {
+                            "name": "meta.function.parameters.craw punctuation.definition.parameters.end.craw"
+                        }
+                    },
+                    "contentName": "meta.function.parameters.craw",
+                    "patterns": [
+                        {
+                            "include": "#parameters"
+                        }
+                    ]
+                },
+                {
+                    "match": "(?<![\\p{Alphabetic}\\p{N}_])(def|gen|template|macro)(?![\\p{Alphabetic}\\p{N}_])[ \\t]*(?:(`)([^`]*)(`)|([\\p{Alphabetic}_][\\p{Alphabetic}\\p{N}_]*))",
+                    "captures": {
+                        "1": {
+                            "patterns": [
+                                {
+                                    "include": "#keywords"
+                                }
+                            ]
+                        },
+                        "2": {
+                            "name": "entity.name.function.craw punctuation.definition.function.begin.craw"
+                        },
+                        "3": {
+                            "name": "entity.name.function.craw"
+                        },
+                        "4": {
+                            "name": "entity.name.function.craw punctuation.definition.function.end.craw"
+                        },
+                        "5": {
+                            "name": "entity.name.function.craw"
+                        }
+                    }
+                }
+            ]
+        },
+        "parameters": {
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "match": "(?:(?<=[(\\[,])|^)[ \\t]*(\\*{1,2})?[ \\t]*(?!(?:if|else|then|match|case|for|while|break|continue|return|yield|where|from|import|use|as|select|orderby|ascending|descending|and|or|not|notin|is|in|to|until|global|nonlocal|copyclosure|addpattern|extends|with|lambda|def|gen|data|class|struct|trait|impl|template|macro|operator|True|False|None)(?![\\p{Alphabetic}\\p{N}_]))([\\p{Alphabetic}_][\\p{Alphabetic}\\p{N}_]*)(?=[ \\t]*(?:[:=,)\\]]|$))",
+                    "captures": {
+                        "1": {
+                            "name": "keyword.operator.unpacking.craw"
+                        },
+                        "2": {
+                            "name": "variable.parameter.craw"
+                        }
+                    }
+                },
+                {
+                    "begin": "\\(",
+                    "beginCaptures": {
+                        "0": {
+                            "name": "punctuation.parenthesis.begin.craw"
+                        }
+                    },
+                    "end": "\\)",
+                    "endCaptures": {
+                        "0": {
+                            "name": "punctuation.parenthesis.end.craw"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "include": "#parameters"
+                        }
+                    ]
+                },
+                {
+                    "begin": "\\[",
+                    "beginCaptures": {
+                        "0": {
+                            "name": "punctuation.section.brackets.begin.craw"
+                        }
+                    },
+                    "end": "\\]",
+                    "endCaptures": {
+                        "0": {
+                            "name": "punctuation.section.brackets.end.craw"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "include": "#parameters"
+                        }
+                    ]
+                },
+                {
+                    "name": "meta.type.annotation.craw",
+                    "begin": ":",
+                    "beginCaptures": {
+                        "0": {
+                            "name": "punctuation.separator.annotation.craw"
+                        }
+                    },
+                    "end": "(?=[,=)\\]])",
+                    "patterns": [
+                        {
+                            "name": "support.type.craw",
+                            "match": "(?<![\\p{Alphabetic}\\p{N}_])(?:None)(?![\\p{Alphabetic}\\p{N}_])"
+                        },
+                        {
+                            "include": "#nested-groups"
+                        },
+                        {
+                            "include": "#expression"
+                        }
+                    ]
+                },
+                {
+                    "name": "meta.parameter.default.craw",
+                    "begin": "=(?![=>])",
+                    "beginCaptures": {
+                        "0": {
+                            "name": "keyword.operator.assignment.craw"
+                        }
+                    },
+                    "end": "(?=[,)\\]])",
+                    "patterns": [
+                        {
+                            "include": "#nested-groups"
+                        },
+                        {
+                            "include": "#expression"
+                        }
+                    ]
+                },
+                {
+                    "include": "#expression"
+                }
+            ]
+        },
+        "nested-groups": {
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "include": "#strings"
+                },
+                {
+                    "include": "#operator-section"
+                },
+                {
+                    "begin": "\\(",
+                    "beginCaptures": {
+                        "0": {
+                            "name": "punctuation.parenthesis.begin.craw"
+                        }
+                    },
+                    "end": "\\)",
+                    "endCaptures": {
+                        "0": {
+                            "name": "punctuation.parenthesis.end.craw"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "include": "#nested-groups"
+                        },
+                        {
+                            "include": "#expression"
+                        }
+                    ]
+                },
+                {
+                    "begin": "\\[",
+                    "beginCaptures": {
+                        "0": {
+                            "name": "punctuation.section.brackets.begin.craw"
+                        }
+                    },
+                    "end": "\\]",
+                    "endCaptures": {
+                        "0": {
+                            "name": "punctuation.section.brackets.end.craw"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "include": "#nested-groups"
+                        },
+                        {
+                            "include": "#expression"
+                        }
+                    ]
+                },
+                {
+                    "begin": "\\{",
+                    "beginCaptures": {
+                        "0": {
+                            "name": "punctuation.section.braces.begin.craw"
+                        }
+                    },
+                    "end": "\\}",
+                    "endCaptures": {
+                        "0": {
+                            "name": "punctuation.section.braces.end.craw"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "include": "#nested-groups"
+                        },
+                        {
+                            "include": "#expression"
+                        }
+                    ]
+                }
+            ]
+        },
+        "type-definition": {
+            "patterns": [
+                {
+                    "match": "(?<![\\p{Alphabetic}\\p{N}_])(data|class|struct|trait)(?![\\p{Alphabetic}\\p{N}_])[ \\t]+([\\p{Alphabetic}_][\\p{Alphabetic}\\p{N}_]*)",
+                    "captures": {
+                        "1": {
+                            "patterns": [
+                                {
+                                    "include": "#keywords"
+                                }
+                            ]
+                        },
+                        "2": {
+                            "name": "entity.name.type.craw"
+                        }
+                    }
+                },
+                {
+                    "match": "(?<![\\p{Alphabetic}\\p{N}_])(extends)(?![\\p{Alphabetic}\\p{N}_])[ \\t]+([\\p{Alphabetic}_][\\p{Alphabetic}\\p{N}_]*)",
+                    "captures": {
+                        "1": {
+                            "name": "storage.modifier.extends.craw"
+                        },
+                        "2": {
+                            "name": "entity.other.inherited-class.craw"
+                        }
+                    }
+                }
+            ]
+        },
+        "decorator": {
+            "patterns": [
+                {
+                    "match": "(@)(?=[ \\t]*(?>[\\p{Alphabetic}_][\\p{Alphabetic}\\p{N}_]*)(?:[ \\t]*,[ \\t]*(?>[\\p{Alphabetic}_][\\p{Alphabetic}\\p{N}_]*))*[ \\t]*->)",
+                    "captures": {
+                        "1": {
+                            "name": "storage.type.function.lambda.craw"
+                        }
+                    }
+                },
+                {
+                    "name": "meta.function.decorator.craw",
+                    "match": "(@)(\\.|[\\p{Alphabetic}_][\\p{Alphabetic}\\p{N}_]*)",
+                    "captures": {
+                        "1": {
+                            "name": "punctuation.definition.decorator.craw"
+                        },
+                        "2": {
+                            "name": "entity.name.function.decorator.craw"
+                        }
+                    }
+                },
+                {
+                    "name": "punctuation.definition.decorator.craw",
+                    "match": "@"
+                }
+            ]
+        },
+        "operator-section": {
+            "name": "meta.operator-section.craw",
+            "match": "(\\()([^\\p{Alphabetic}\\p{N}_() \\n|,?\"'\\[{][^\\p{Alphabetic}\\p{N} ,?)\\n]*)(\\))",
+            "captures": {
+                "1": {
+                    "name": "punctuation.parenthesis.begin.craw"
+                },
+                "2": {
+                    "patterns": [
+                        {
+                            "include": "#operators"
+                        }
+                    ]
+                },
+                "3": {
+                    "name": "punctuation.parenthesis.end.craw"
+                }
+            }
+        },
+        "operators": {
+            "patterns": [
+                {
+                    "name": "keyword.operator.pipe.craw",
+                    "match": "\\|\\?\\*\\*>|\\|\\?\\*>|\\|\\?>|\\|\\*\\*>|\\|\\*>|\\|>"
+                },
+                {
+                    "name": "keyword.operator.pipe.craw",
+                    "match": "<\\*\\*\\?\\||<\\*\\?\\||<\\?\\||<\\*\\*\\||<\\*\\||<\\|"
+                },
+                {
+                    "name": "keyword.operator.pipe.compose.craw",
+                    "match": "\\.\\.\\*\\*>|\\.\\.\\*>|\\.\\.\\?>|>>|<<|∘"
+                },
+                {
+                    "name": "keyword.operator.range.craw",
+                    "match": "\\.\\."
+                },
+                {
+                    "name": "keyword.operator.comparison.broadcast.craw",
+                    "match": "\\.==|\\.!=|\\.<=|\\.>=|\\.<|\\.>"
+                },
+                {
+                    "name": "keyword.operator.arithmetic.broadcast.craw",
+                    "match": "\\.\\+|\\.-|\\.\\*|\\./|\\.%"
+                },
+                {
+                    "name": "keyword.operator.assignment.augmented.craw",
+                    "match": "\\*\\*=|\\+=|-=|\\*=|/="
+                },
+                {
+                    "name": "keyword.operator.arrow.craw",
+                    "match": "=>|->"
+                },
+                {
+                    "name": "keyword.operator.comparison.craw",
+                    "match": "==|!=|<=|>=|<|>"
+                },
+                {
+                    "name": "keyword.operator.assignment.craw",
+                    "match": "="
+                },
+                {
+                    "name": "keyword.operator.arithmetic.craw",
+                    "match": "\\*\\*|//|[-+*/%]"
+                },
+                {
+                    "name": "keyword.operator.logical.none-coalescing.craw",
+                    "match": "\\?\\?"
+                },
+                {
+                    "name": "keyword.operator.ternary.craw",
+                    "match": "\\?"
+                },
+                {
+                    "name": "keyword.operator.partial.craw",
+                    "match": "\\$"
+                },
+                {
+                    "name": "keyword.operator.formula.craw",
+                    "match": "~"
+                },
+                {
+                    "name": "keyword.operator.bitwise.craw",
+                    "match": "[&|^]"
+                },
+                {
+                    "name": "invalid.illegal.unexpected.craw",
+                    "match": "!"
+                },
+                {
+                    "name": "keyword.operator.arithmetic.craw",
+                    "match": "[÷×√∑∏±∓·⋅]"
+                },
+                {
+                    "name": "keyword.operator.comparison.craw",
+                    "match": "[≈≠≤≥≡≢∈∉∋⊆⊂⊇⊃]"
+                },
+                {
+                    "name": "keyword.operator.logical.craw",
+                    "match": "[¬∧∨]"
+                },
+                {
+                    "name": "keyword.operator.set.craw",
+                    "match": "[∩∪∖]"
+                },
+                {
+                    "name": "keyword.operator.custom.craw",
+                    "match": "[^\\x00-\\x7F\\p{Alphabetic}\\s]|\\\\"
+                }
+            ]
+        },
+        "punctuation": {
+            "patterns": [
+                {
+                    "name": "punctuation.accessor.craw",
+                    "match": "\\."
+                },
+                {
+                    "name": "punctuation.separator.comma.craw",
+                    "match": ","
+                },
+                {
+                    "name": "punctuation.separator.colon.craw",
+                    "match": ":"
+                },
+                {
+                    "name": "punctuation.terminator.statement.craw",
+                    "match": ";"
+                },
+                {
+                    "name": "punctuation.parenthesis.begin.craw",
+                    "match": "\\("
+                },
+                {
+                    "name": "punctuation.parenthesis.end.craw",
+                    "match": "\\)"
+                },
+                {
+                    "name": "punctuation.section.brackets.begin.craw",
+                    "match": "\\["
+                },
+                {
+                    "name": "punctuation.section.brackets.end.craw",
+                    "match": "\\]"
+                },
+                {
+                    "name": "punctuation.section.braces.begin.craw",
+                    "match": "\\{"
+                },
+                {
+                    "name": "punctuation.section.braces.end.craw",
+                    "match": "\\}"
+                }
+            ]
+        },
+        "rust-line-passthrough": {
+            "name": "meta.embedded.block.rust",
+            "begin": "^[ \\t]*(?=use |extern )|^(?=let )",
+            "while": "(?!)",
+            "patterns": [
+                {
+                    "include": "#rust-nested"
+                }
+            ]
+        },
+        "rust-fn-item": {
+            "name": "meta.embedded.block.rust",
+            "begin": "^[ \\t]*(?=fn[ (])",
+            "end": "(?<=\\})",
+            "patterns": [
+                {
+                    "include": "#rust-nested"
+                }
+            ]
+        },
+        "rust-block": {
+            "name": "meta.rust-block.craw",
+            "begin": "^([ \\t]*)((?:[^\"'#`\\n]|\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'|`[^`]*`)*?)(?<![\\p{Alphabetic}\\p{N}_])(rust)(:)(.*)$",
+            "beginCaptures": {
+                "2": {
+                    "patterns": [
+                        {
+                            "include": "#expression"
+                        }
+                    ]
+                },
+                "3": {
+                    "name": "keyword.other.passthrough.craw"
+                },
+                "4": {
+                    "name": "punctuation.section.embedded.begin.craw"
+                },
+                "5": {
+                    "patterns": [
+                        {
+                            "comment": "Rust attributes (#[...], #![...]) are code, not Craw comments.",
+                            "name": "meta.embedded.block.rust",
+                            "match": "#!?\\[.*",
+                            "captures": {
+                                "0": {
+                                    "patterns": [
+                                        {
+                                            "include": "#rust-nested"
+                                        }
+                                    ]
+                                }
+                            }
+                        },
+                        {
+                            "include": "#comments"
+                        },
+                        {
+                            "comment": "Code on the rust: line itself is the block's first line.",
+                            "name": "meta.embedded.block.rust",
+                            "match": "\\S.*",
+                            "captures": {
+                                "0": {
+                                    "patterns": [
+                                        {
+                                            "include": "#rust-nested"
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    ]
+                }
+            },
+            "while": "^(?=\\1[ \\t]+\\S|[ \\t]*$)",
+            "contentName": "meta.embedded.block.rust",
+            "patterns": [
+                {
+                    "include": "#rust-nested"
+                }
+            ]
+        },
+        "rust-escape": {
+            "patterns": [
+                {
+                    "name": "meta.passthrough.craw",
+                    "begin": "(®|⚙|🦀|\\\\)(\\()",
+                    "beginCaptures": {
+                        "1": {
+                            "name": "keyword.other.passthrough.craw"
+                        },
+                        "2": {
+                            "name": "punctuation.section.embedded.begin.craw"
+                        }
+                    },
+                    "end": "\\)",
+                    "endCaptures": {
+                        "0": {
+                            "name": "punctuation.section.embedded.end.craw"
+                        }
+                    },
+                    "contentName": "meta.embedded.block.rust",
+                    "patterns": [
+                        {
+                            "include": "#rust-nested"
+                        }
+                    ]
+                },
+                {
+                    "name": "meta.passthrough.craw",
+                    "begin": "(®|⚙|🦀|\\\\)[ \\t]",
+                    "beginCaptures": {
+                        "1": {
+                            "name": "keyword.other.passthrough.craw"
+                        }
+                    },
+                    "while": "(?!)",
+                    "contentName": "meta.embedded.block.rust",
+                    "patterns": [
+                        {
+                            "include": "#rust-nested"
+                        }
+                    ]
+                }
+            ]
+        },
+        "rust-nested": {
+            "patterns": [
+                {
+                    "match": "\\b(fn)\\b(?:[ \\t]+((?:r#)?[A-Za-z_][A-Za-z0-9_]*))?",
+                    "captures": {
+                        "1": {
+                            "name": "keyword.other.fn.rust"
+                        },
+                        "2": {
+                            "name": "entity.name.function.rust"
+                        }
+                    }
+                },
+                {
+                    "match": "\\b([A-Za-z_][A-Za-z0-9_]*)(?=\\()",
+                    "captures": {
+                        "1": {
+                            "name": "entity.name.function.rust"
+                        }
+                    }
+                },
+                {
+                    "begin": "\\{",
+                    "beginCaptures": {
+                        "0": {
+                            "name": "punctuation.brackets.curly.rust"
+                        }
+                    },
+                    "end": "\\}",
+                    "endCaptures": {
+                        "0": {
+                            "name": "punctuation.brackets.curly.rust"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "include": "#rust-nested"
+                        }
+                    ]
+                },
+                {
+                    "begin": "\\(",
+                    "beginCaptures": {
+                        "0": {
+                            "name": "punctuation.brackets.round.rust"
+                        }
+                    },
+                    "end": "\\)",
+                    "endCaptures": {
+                        "0": {
+                            "name": "punctuation.brackets.round.rust"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "include": "#rust-nested"
+                        }
+                    ]
+                },
+                {
+                    "include": "source.rust"
+                },
+                {
+                    "name": "comment.line.double-slash.rust",
+                    "match": "//.*$"
+                },
+                {
+                    "name": "comment.block.rust",
+                    "begin": "/\\*",
+                    "end": "\\*/"
+                },
+                {
+                    "name": "string.quoted.double.rust",
+                    "begin": "(b?r)(#*)\"",
+                    "end": "\"\\2"
+                },
+                {
+                    "name": "string.quoted.double.rust",
+                    "begin": "b?\"",
+                    "end": "\"",
+                    "patterns": [
+                        {
+                            "name": "constant.character.escape.rust",
+                            "match": "\\\\."
+                        }
+                    ]
+                },
+                {
+                    "name": "string.quoted.single.char.rust",
+                    "match": "b?'(?:[^'\\\\]|\\\\(?:x[0-9a-fA-F]{2}|u\\{[0-9a-fA-F]{1,6}\\}|.))'"
+                },
+                {
+                    "name": "storage.modifier.lifetime.rust",
+                    "match": "'[A-Za-z_][A-Za-z0-9_]*"
+                }
+            ]
+        }
+    }
+}

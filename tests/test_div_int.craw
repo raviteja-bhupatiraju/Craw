@@ -1,0 +1,6 @@
+def main():
+    f = 10.5
+    i = f // 1
+    print(f, "// 1 =", i)
+
+main()

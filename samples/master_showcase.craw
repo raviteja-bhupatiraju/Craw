@@ -1,0 +1,182 @@
+# samples/master_showcase.craw
+# A comprehensive showcase of Craw language features.
+
+# 1. Rust Interop & Imports
+use std::thread;
+
+# 2. Algebraic Data Types (ADTs)
+data Point(x, y)
+data Player(name, score, height)
+data Up(steps)
+data Down(steps)
+data Left(steps)
+data Right(steps)
+data PrintState()
+
+# 3. Custom Operators & Function Composition
+def `∘`(f, g) = x => f(g(x))
+
+def double(x) = 2 * x
+def square(x) = x * x
+def add(a, b) = a + b
+
+# 4. Unicode Operators & ASCII Alternatives
+def `√`(x) = sqrt(x)
+def `≈`(a, b) = (a - b).abs() < 0.000000001
+def `⊕`(a, b) = a + b
+def `∈`(x, s) = x in s
+def `∉`(x, s) = x notin s
+
+# 5. Generators
+gen fib():
+    a = 0; b = 1
+    while True:
+        yield a
+        next_a = b
+        b = a + b
+        a = next_a
+
+# 6. Templates (Nim-style)
+template log(msg, val):
+    print("LOG:", msg, "=", val)
+
+# 7. Helper Functions
+def pad_string(s, length):
+    diff = length - len(s)
+    pad = if diff > 0 then " " * diff else ""
+    return s + pad
+
+def format_row(name, age, role):
+    pad_name = pad_string(name, 12)
+    pad_age = pad_string(str(age), 5)
+    pad_role = pad_string(role, 15)
+    return "| " + pad_name + "| " + pad_age + "| " + pad_role + "|"
+
+def main():
+    print("=== Craw Language Master Showcase ===")
+
+    print("\n--- 1. Basic Syntax & Ternary ---")
+    val_x = 5
+    val_y = 2 * val_x + 1
+    print("val_x =", val_x, ", 2 * val_x + 1 =", val_y)
+    print("Ternary:", if val_x > 2 then "big" else "small")
+
+    print("\n--- 2. Pipelines & Composition ---")
+    # Pipelines with |> and |*> (splat pipe)
+    res_pipe = [10, 20] |*> add |> square
+    print("Pipeline [10, 20] |*> add |> square =", res_pipe) # 900
+
+    # Composition using >>, << and Unicode ∘
+    f = double ∘ square
+    g = square >> double
+    h = double << square
+    print("double ∘ square (3):", f(3))  # 18
+    print("square >> double (3):", g(3))  # 18
+    print("double << square (3):", h(3))  # 18
+
+    # Partial application with $ and _ (holes)
+    h_chain = str ∘ double ∘ square ∘ add$(_, 1)
+    print("Chain with partial add(_, 1) (2):", h_chain(2)) # "18"
+
+    print("\n--- 3. Set Literals & Operators ---")
+    s1 = {1, 2, 3}
+    s2 = {3, 4, 5}
+    print("s1 =", s1, "s2 =", s2)
+    print("Union (s1 | s2):", s1 | s2)
+    print("Intersection (s1 & s2):", s1 & s2)
+    print("Is 3 in s1?", 3 in s1)
+    print("Is {1, 2} ⊆ s1?", {1, 2} ⊆ s1)
+    print("Is 10 ∈ s1?", 10 ∈ s1) # Unicode alternative
+
+    print("\n--- 4. Ranges & Gathering ---")
+    print("Range 1..5:", 1..5)
+    
+    players = [
+        Player("Alice", 150, 185),
+        Player("Bob", 80, 170),
+        Player("Charlie", 200, 190)
+    ]
+    # Gathering syntax: collection..field
+    print("Gathered names (players..name):", players..name)
+
+    print("\n--- 5. LHS Destructuring ---")
+    [px, py] = [10.5, 20.5]
+    print("Destructured [px, py] = [10.5, 20.5] ->", px, py)
+
+    [head, *tail] = [1, 2, 3, 4, 5]
+    print("Head/Tail: head =", head, "tail =", tail)
+
+    print("\n--- 6. Pattern Matching & Guards ---")
+    for i in 1..5:
+        match i:
+            case n if n % 2 == 0:
+                print(n, "is even")
+            case n:
+                print(n, "is odd")
+
+    print("\n--- 7. Broadcasting & Matrix Literals ---")
+    nums = [1, 2, 3]
+    print("Broadcasting: nums .+ 10 =", nums .+ 10)
+    print("Broadcasting: double.(nums) =", double.(nums))
+
+    M = [1, 2, 3; 4, 5, 6]
+    print("Matrix M:\n", M)
+    print("M[1, 0]:", M[1, 0])
+
+    print("\n--- 8. Data Analysis & Masking ---")
+    tall_players = players[.height > 180]
+    print("Tall players (.height > 180):", tall_players)
+
+    print("\n--- 9. Pattern Matching ADTs ---")
+    p_inst = Point(10, 20)
+    match p_inst:
+        case Point(x, y):
+            print("Matched Point: x =", x, "y =", y)
+    
+    moves = [Up(10), Right(5), PrintState(), Down(3)]
+    x = 0; y = 0
+    for move in moves:
+        match move:
+            case Up(s):
+                y += s
+            case Down(s):
+                y -= s
+            case Right(s):
+                x += s
+            case Left(s):
+                x -= s
+            case PrintState():
+                print("  [Robot] X:", x, "Y:", y)
+    
+    print("\n--- 10. Generators & Comprehensions ---")
+    print("List comp [n*n]:", [n * n for n in range(5)])
+    
+    f_gen = fib()
+    print("First 5 Fibs:", [next(f_gen) for _ in range(5)])
+
+    print("\n--- 11. Rust Interop ---")
+    cores = rust:
+        let t = std::thread::available_parallelism().unwrap().get();
+        t as i64
+    print("Available Cores (via Rust):", cores)
+
+    print("\n--- 12. Keyword Elision & Varargs ---")
+    name = "Charlie"; age = 22; role = "Intern"
+    print(format_row(name, age, role)) # Elided keyword args
+
+    def greet(target, greeting="Hello", *others):
+        print(greeting + ", " + target, if others.len() > 0 then "(also: " + str(others) + ")" else "")
+    
+    greet("Alice")
+    greet("Bob", "Hi")
+    greet("Charlie", "Hey", "Dave", "Eve")
+
+    print("\n--- 13. Unicode Math ---")
+    print("10 ÷ 3 =", 10 ÷ 3)
+    print("∑ [1, 2, 3] =", ∑ [1, 2, 3])
+    print("√64 =", √64)
+
+    print("\n--- 14. Templates ---")
+    log("Status", "Approved")
+
+main()

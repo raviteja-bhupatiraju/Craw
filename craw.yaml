@@ -1,0 +1,83 @@
+filetype: craw
+
+detect:
+    filename: "\\.craw$"
+
+rules:
+    # Comments
+    - comment:
+        start: "#"
+        end: "$"
+        rules:
+            - todo: "(TODO|XXX|FIXME):?"
+
+    # Keywords — exactly the lexer's keyword table (src/lexer.rs). Words
+    # like `try`, `async`, `pass`, `let` or `fn` are NOT Craw keywords.
+    - statement: "\\b(if|else|then|match|case|for|while|break|continue|return|yield|where)\\b"
+    - statement: "\\b(def|gen|data|class|struct|trait|impl|template|macro|operator|lambda)\\b"
+    - statement: "\\b(from|import|use|as|global|nonlocal|extends|with|copyclosure|addpattern)\\b"
+    - statement: "\\b(select|orderby|ascending|descending|to|until)\\b"
+    - statement: "\\b(and|or|not|notin|is|in)\\b"
+    # Only the capitalized forms are constants; `true`/`none` are names.
+    - constant.bool: "\\b(True|False|None)\\b"
+    - type: "\\b(Int|Float|String|Bool|List|Dict|Set|Tuple|Dynamic)\\b"
+
+    # Unicode symbols (λ only on its own; `λx` is one identifier)
+    - special: "(^|[^[:alnum:]_])λ([^[:alnum:]_]|$)"
+    - special: "[∘∩∪≠≤≥∈∉÷×√∑∏±]"
+
+    # Pipes: |> |*> |**> |?> |?*> |?**>  and  <| <*| <**| <?| <*?| <**?|
+    - symbol.operator: "(\\|\\?\\*\\*>|\\|\\?\\*>|\\|\\?>|\\|\\*\\*>|\\|\\*>|\\|>)"
+    - symbol.operator: "(<\\*\\*\\?\\||<\\*\\?\\||<\\?\\||<\\*\\*\\||<\\*\\||<\\|)"
+    # Composition: ..*> ..**> ..?> >> <<   (`..>` is `..` then `>`)
+    - symbol.operator: "(\\.\\.\\*\\*>|\\.\\.\\*>|\\.\\.\\?>|>>|<<|\\.\\.)"
+    # Broadcasting: .+ .- .* ./ .% .== .!= .< .<= .> .>=
+    - symbol.operator: "(\\.==|\\.!=|\\.<=|\\.>=|\\.<|\\.>|\\.\\+|\\.-|\\.\\*|\\./|\\.%)"
+    - symbol.operator: "(=>|->|\\?\\?|\\$|\\*\\*=|\\+=|-=|\\*=|/=|\\*\\*|==|!=|<=|>=)"
+    - symbol.operator: "([-+/*=<>~%&|^?])"
+    # A lone `!` is a syntax error (negation is `not`).
+    - error: "!"
+
+    # Attributes, decorators and numbers
+    - symbol: "\\.[a-zA-Z_][a-zA-Z0-9_]*"
+    - preproc: "@[a-zA-Z_][a-zA-Z0-9_]*"
+    - constant.number: "\\b(0[xX][0-9a-fA-F_]+|0[oO][0-7_]+|0[bB][01_]+)\\b"
+    - constant.number: "\\b([0-9][0-9_]*\\.[0-9][0-9_]*([eE][-+]?[0-9]+)?|[0-9][0-9_]*[eE][-+]?[0-9]+)\\b"
+    - constant.number: "\\b([0-9][0-9_]*)\\b"
+
+    # Rust passthrough: `rust:` blocks (code may start on the same line),
+    # ®(...)/⚙(...)/🦀(...)/\(...) escapes, and top-level `fn`/`use`/`extern`
+    - preproc: "\\brust:"
+    - preproc: "(®|⚙|🦀|\\\\)\\(?"
+    - preproc: "^\\s*(fn|use|extern)\\b"
+
+    # Brackets and Punctuation
+    - symbol.brackets: "(\\(\\||\\|\\))" # Lazy list literals (| |)
+    - symbol.brackets: "(\\{|\\})"
+    - symbol.brackets: "(\\(|\\))"
+    - symbol.brackets: "(\\[|\\])"
+    - symbol.brackets: "\\b[smf]\\{" # Set/Multiset/Frozenset literals
+    - symbol: "(:|,|;)"
+
+    # Strings (f"..." interpolates {expr}; no f'...' form)
+    - constant.string:
+        start: "f\""
+        end: "\""
+        rules:
+            - special: "\\{[^}]*\\}"
+    - constant.string:
+        start: "`"
+        end: "`"
+        rules: []
+    - constant.string:
+        start: "\""
+        end: "\""
+        skip: "\\\\."
+        rules:
+            - constant.specialChar: "\\\\[abfnrtv'\\\"\\\\]"
+    - constant.string:
+        start: "'"
+        end: "'"
+        skip: "\\\\."
+        rules:
+            - constant.specialChar: "\\\\[abfnrtv'\\\"\\\\]"

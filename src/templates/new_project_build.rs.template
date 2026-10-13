@@ -1,0 +1,31 @@
+use std::path::Path;
+use std::process::Command;
+
+/// Asks Cargo to rebuild when any `.craw` file under `dir` changes: the
+/// entry point and every module it may import. (Watching `src/` itself
+/// would rerun on every build, since the transpiled output lands there.)
+fn watch_craw_files(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            watch_craw_files(&path);
+        } else if path.extension().is_some_and(|e| e == "craw") {
+            println!("cargo:rerun-if-changed={}", path.display());
+        }
+    }
+}
+
+fn main() {
+    watch_craw_files(Path::new("src"));
+    let status = Command::new("craw")
+        .args(&["transpile", "src/main.craw", "src/main_transpiled.rs"])
+        .status()
+        .expect("Failed to execute craw transpile");
+
+    if !status.success() {
+        panic!("craw transpile failed");
+    }
+}
